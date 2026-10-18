@@ -18,10 +18,20 @@ async def start_server():
         transport.close()
 
 
+
 class UDPServerProtocol(asyncio.DatagramProtocol):
+    def connection_made(self, transport):
+        self.transport = transport
+
     def datagram_received(self, data, addr):
         message = data.decode("utf-8")
         print(f"Received from {addr}: {message}")
+
+        reply = "ACK: Message received"
+        self.transport.sendto(reply.encode("utf-8"), addr)
+
+        print(f"Reply sent to {addr}: {reply}")
+
 
 
 if __name__ == "__main__":
