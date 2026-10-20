@@ -8,6 +8,17 @@ def create_message(sender_id, message_type, payload=None):
         "message_type": message_type,
         "payload": payload or {},
     }
+def create_hello_message(peer):
+    """Create a HELLO message to announce a peer."""
+    return create_message(
+        sender_id=peer.peer_id,
+        message_type="HELLO",
+        payload={
+            "peer_id": peer.peer_id,
+            "host": peer.host,
+            "port": peer.port,
+        },
+    )
 def encode_message(message):
     """Convert a message dictionary to UTF-8 bytes."""
     return json.dumps(message).encode("utf-8")
@@ -31,15 +42,6 @@ def decode_message(data):
     if not isinstance(message["payload"], dict):
         raise ValueError("payload must be a dictionary")
     return message
-
-def test_invalid_json_is_rejected(self):
-        invalid_data = b'{"sender_id":'
-        with self.assertRaises(json.JSONDecodeError):
-            decode_message(invalid_data)
-def test_non_json_text_is_rejected(self):
-        invalid_data = b"Hello MeshWeaver"
-        with self.assertRaises(json.JSONDecodeError):
-            decode_message(invalid_data)
 if __name__ == "__main__":
     message = create_message(
         sender_id="node_A",
