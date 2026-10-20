@@ -22,5 +22,14 @@ class TestPeer(unittest.TestCase):
     def test_port_above_range_is_rejected(self):
         with self.assertRaises(ValueError):
             Peer(host="127.0.0.1", port=65536)
+    def test_empty_peer_id_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Peer(peer_id="")
+    def test_invalid_peer_id_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Peer(peer_id=123)
+    def test_empty_host_is_rejected(self):
+        with self.assertRaises(ValueError):
+            Peer(host="")
 if __name__ == "__main__":
     unittest.main()

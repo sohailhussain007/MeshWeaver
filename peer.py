@@ -2,11 +2,16 @@ import uuid
 class Peer:
     """Represents a node in the MeshWeaver network."""
     def __init__(self, peer_id=None, host="127.0.0.1", port=0):
+        if peer_id is not None:
+            if not isinstance(peer_id, str) or not peer_id.strip():
+                raise ValueError("peer_id must be a non-empty string")
+        if not isinstance(host, str) or not host.strip():
+            raise ValueError("host must be a non-empty string")
         if not isinstance(port, int) or isinstance(port, bool):
             raise ValueError("Port must be an integer")
         if not 0 <= port <= 65535:
             raise ValueError("Port must be between 0 and 65535")
-        self.peer_id = peer_id or str(uuid.uuid4())
+        self.peer_id = peer_id if peer_id is not None else str(uuid.uuid4())
         self.host = host
         self.port = port
     def to_dict(self):
