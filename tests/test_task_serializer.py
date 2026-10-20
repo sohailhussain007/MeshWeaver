@@ -49,6 +49,19 @@ class TestTaskSerializer(unittest.TestCase):
         with self.assertRaises(TypeError):
             deserialize_task("not bytes")
 
+    def test_round_trip_preserves_function(self):
+        data = serialize_task(add, (10, 20))
+        task = deserialize_task(data)
+
+        self.assertEqual(task["function"](task["args"][0], task["args"][1]), 30)
+
+    def test_round_trip_preserves_keyword_arguments(self):
+        data = serialize_task(greet, ("Rannjana",), {"greeting": "Welcome"})
+        task = deserialize_task(data)
+
+        self.assertEqual(task["kwargs"]["greeting"], "Welcome")
+        self.assertEqual(execute_task(task), "Welcome, Rannjana!")
+
 
 if __name__ == "__main__":
     unittest.main()
