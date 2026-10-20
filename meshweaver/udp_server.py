@@ -1,6 +1,8 @@
 
 import asyncio
 
+from meshweaver.protocol import parse_message
+
 
 async def start_server():
     loop = asyncio.get_running_loop()
@@ -18,21 +20,32 @@ async def start_server():
         transport.close()
 
 
-
 class UDPServerProtocol(asyncio.DatagramProtocol):
     def connection_made(self, transport):
         self.transport = transport
 
     def datagram_received(self, data, addr):
-        message = data.decode("utf-8")
-        print(f"Received from {addr}: {message}")
+        try:
+            raw_message = data.decode("utf-8")
+            message = parse_message(raw_message)
 
-        reply = "ACK: Message received"
-        self.transport.sendto(reply.encode("utf-8"), addr)
+            message_type = message["type"]
+            message_data = message["data"]
 
-        print(f"Reply sent to {addr}: {reply}")
+            print(f"Received from {addr}: {message}")
 
+            if message_type == "PING":
+                reply = "ACK: PING received"
+            else:
+                reply = f"ERROR: Unsupported message type: {message_type}"
+
+            self.transport.sendto(reply.encode("utf-8"), addr)
+            print(f"Reply sent to {addr}: {reply}")
+
+        except (UnicodeDecodeError, ValueError) as error:
+            print(f"Invalid message from {addr}: {error}")
 
 
 if __name__ == "__main__":
     asyncio.run(start_server())
+
