@@ -24,5 +24,13 @@ class TestProtocol(unittest.TestCase):
         invalid_data = b'{"sender_id": "node_A"}'
         with self.assertRaises(ValueError):
             decode_message(invalid_data)
+    def test_json_list_is_rejected(self):
+        invalid_data = b'["node_A", "HELLO"]'
+        with self.assertRaises(ValueError):
+            decode_message(invalid_data)
+    def test_missing_required_fields(self):
+        invalid_data = b'{"sender_id": "node_A"}'
+        with self.assertRaises(ValueError):
+            decode_message(invalid_data)
 if __name__ == "__main__":
     unittest.main()

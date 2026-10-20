@@ -14,14 +14,14 @@ def encode_message(message):
 def decode_message(data):
     """Convert UTF-8 message bytes back to a dictionary."""
     message = json.loads(data.decode("utf-8"))
+    if not isinstance(message, dict):
+        raise ValueError("Message must be a JSON object")
     required_fields = {
         "message_id",
         "sender_id",
         "message_type",
         "payload",
     }
-    if not isinstance(message, dict):
-        raise ValueError("Message must be a JSON object")
     if not required_fields.issubset(message):
         raise ValueError("Message is missing required fields")
     if not isinstance(message["sender_id"], str) or not message["sender_id"]:
