@@ -1,3 +1,4 @@
+import json
 import unittest
 from protocol import create_message, encode_message, decode_message
 class TestProtocol(unittest.TestCase):
@@ -31,6 +32,14 @@ class TestProtocol(unittest.TestCase):
     def test_missing_required_fields(self):
         invalid_data = b'{"sender_id": "node_A"}'
         with self.assertRaises(ValueError):
+            decode_message(invalid_data)
+    def test_invalid_json_is_rejected(self):
+        invalid_data = b'{"sender_id":'
+        with self.assertRaises(json.JSONDecodeError):
+            decode_message(invalid_data)
+    def test_non_json_text_is_rejected(self):
+        invalid_data = b"Hello MeshWeaver"
+        with self.assertRaises(json.JSONDecodeError):
             decode_message(invalid_data)
 if __name__ == "__main__":
     unittest.main()

@@ -31,6 +31,15 @@ def decode_message(data):
     if not isinstance(message["payload"], dict):
         raise ValueError("payload must be a dictionary")
     return message
+
+def test_invalid_json_is_rejected(self):
+        invalid_data = b'{"sender_id":'
+        with self.assertRaises(json.JSONDecodeError):
+            decode_message(invalid_data)
+def test_non_json_text_is_rejected(self):
+        invalid_data = b"Hello MeshWeaver"
+        with self.assertRaises(json.JSONDecodeError):
+            decode_message(invalid_data)
 if __name__ == "__main__":
     message = create_message(
         sender_id="node_A",
