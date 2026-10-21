@@ -62,6 +62,26 @@ class TestTaskSerializer(unittest.TestCase):
         self.assertEqual(task["kwargs"]["greeting"], "Welcome")
         self.assertEqual(execute_task(task), "Welcome, Rannjana!")
 
+    def test_execute_task_propagates_function_error(self):
+        def failing_task():
+            raise ValueError("Task failed")
+
+        data = serialize_task(failing_task)
+        task = deserialize_task(data)
+
+        with self.assertRaisesRegex(ValueError, "Task failed"):
+            execute_task(task)
+
+    def test_execute_task_propagates_type_error(self):
+        def invalid_operation():
+            return 1 + "text"
+
+        data = serialize_task(invalid_operation)
+        task = deserialize_task(data)
+
+        with self.assertRaises(TypeError):
+            execute_task(task)
+
 
 if __name__ == "__main__":
     unittest.main()
