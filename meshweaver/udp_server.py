@@ -35,7 +35,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             print(f"Received from {addr}: {message}")
 
             if message_type == "PING":
-                reply = "ACK: PING received"
+                reply = "PONG"
             else:
                 reply = f"ERROR: Unsupported message type: {message_type}"
 

@@ -18,11 +18,20 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
         print("Sent message:", message)
 
+
     def datagram_received(self, data, addr):
         reply = data.decode("utf-8")
         print(f"Received reply from server: {reply}")
 
+        
+        if reply == "PONG":
+            print("Health check passed!")
+        else:
+            print("Health check failed: Invalid response")
+
+
         self.reply_received.set()
+
 
     def error_received(self, exc):
         print(f"UDP error: {exc}")
