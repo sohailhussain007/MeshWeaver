@@ -16,6 +16,17 @@ def greet(name, greeting="Hello"):
     return f"{greeting}, {name}!"
 
 
+def count_items(items):
+    return len(items)
+
+
+def get_user_name(user):
+    return user["name"]
+
+
+def get_status():
+    return "ready"
+
 class TestTaskSerializer(unittest.TestCase):
 
     def test_serialize_returns_bytes(self):
@@ -82,6 +93,28 @@ class TestTaskSerializer(unittest.TestCase):
         with self.assertRaises(TypeError):
             execute_task(task)
 
+
+    def test_list_argument(self):
+        data = serialize_task(count_items, ([10, 20, 30],))
+        task = deserialize_task(data)
+
+        self.assertEqual(task["args"], ([10, 20, 30],))
+        self.assertEqual(execute_task(task), 3)
+
+    def test_dictionary_argument(self):
+        user = {"name": "Rannjana", "role": "developer"}
+        data = serialize_task(get_user_name, (user,))
+        task = deserialize_task(data)
+
+        self.assertEqual(task["args"][0], user)
+        self.assertEqual(execute_task(task), "Rannjana")
+
+    def test_task_without_arguments(self):
+        data = serialize_task(get_status)
+        task = deserialize_task(data)
+
+        self.assertEqual(task["args"], ())
+        self.assertEqual(execute_task(task), "ready")
 
 if __name__ == "__main__":
     unittest.main()
