@@ -115,6 +115,16 @@ class TestTaskSerializer(unittest.TestCase):
 
         self.assertEqual(task["args"], ())
         self.assertEqual(execute_task(task), "ready")
+    def test_nested_function_round_trip(self):
+        def multiply_by_factor(factor):
+            def multiply(value):
+                return value * factor
+            return multiply
 
+        func = multiply_by_factor(4)
+        data = serialize_task(func, (5,))
+        task = deserialize_task(data)
+
+        self.assertEqual(execute_task(task), 20)
 if __name__ == "__main__":
     unittest.main()
