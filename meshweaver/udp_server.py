@@ -2,7 +2,7 @@
 import asyncio
 
 from meshweaver.protocol import parse_message
-
+from meshweaver.serialization import deserialize_task
 
 async def start_server():
     loop = asyncio.get_running_loop()
@@ -32,10 +32,24 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             message_type = message["type"]
             message_data = message["data"]
 
-            print(f"Received from {addr}: {message}")
+            print(f"Received {message_type} message from {addr}")
 
             if message_type == "PING":
                 reply = "PONG"
+
+            elif message_type == "TASK":
+                encoded_task = message_data["task"]
+                task = deserialize_task(encoded_task)
+
+                function = task["function"]
+                args = task["args"]
+                kwargs = task["kwargs"]
+
+                result = function(*args, **kwargs)
+                reply = f"RESULT: {result}"
+
+                print(f"Task executed successfully. Result: {result}")
+
             else:
                 reply = f"ERROR: Unsupported message type: {message_type}"
 
