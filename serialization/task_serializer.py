@@ -1,7 +1,7 @@
 """Serialize and deserialize Python tasks for MeshWeaver."""
 
 import cloudpickle
-
+import pickle
 
 def serialize_task(func, args=(), kwargs=None):
     """Serialize a function and its arguments into bytes."""
@@ -30,8 +30,18 @@ def deserialize_task(data):
     """Deserialize task bytes into a task dictionary."""
     if not isinstance(data, bytes):
         raise TypeError("data must be bytes")
-
-    task = cloudpickle.loads(data)
+    try:
+        task = cloudpickle.loads(data)
+    except (
+        pickle.UnpicklingError,
+        EOFError,
+        ValueError,
+        TypeError,
+        AttributeError,
+        ImportError,
+        IndexError,
+    ) as error:
+        raise ValueError("Invalid serialized task data") from error
 
     if not isinstance(task, dict):
         raise ValueError("Invalid task: expected a dictionary")

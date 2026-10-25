@@ -60,6 +60,10 @@ class TestTaskSerializer(unittest.TestCase):
         with self.assertRaises(TypeError):
             deserialize_task("not bytes")
 
+    def test_corrupted_serialized_data_is_rejected(self):
+        with self.assertRaises(ValueError):
+            deserialize_task(b"this is not valid serialized data")
+
     def test_round_trip_preserves_function(self):
         data = serialize_task(add, (10, 20))
         task = deserialize_task(data)
