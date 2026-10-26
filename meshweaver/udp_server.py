@@ -1,5 +1,6 @@
 
 import asyncio
+from dbm import error
 
 from meshweaver.protocol import parse_message
 from meshweaver.serialization import deserialize_task
@@ -45,10 +46,14 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 args = task["args"]
                 kwargs = task["kwargs"]
 
-                result = function(*args, **kwargs)
-                reply = f"RESULT: {result}"
+                try:
+                    result = function(*args, **kwargs)
+                    reply = f"RESULT: {result}"
+                    print(f"Task executed successfully. Result: {result}")
 
-                print(f"Task executed successfully. Result: {result}")
+                except Exception as error:
+                    reply = f"ERROR: Task execution failed: {error}"
+                    print(f"Task execution failed: {error}")
 
             else:
                 reply = f"ERROR: Unsupported message type: {message_type}"
@@ -56,9 +61,11 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             self.transport.sendto(reply.encode("utf-8"), addr)
             print(f"Reply sent to {addr}: {reply}")
 
-        except (UnicodeDecodeError, ValueError) as error:
+        except (UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
             print(f"Invalid message from {addr}: {error}")
-
+            reply = f"ERROR: Invalid message: {error}"
+            self.transport.sendto(reply.encode("utf-8"), addr)
+            print(f"Reply sent to {addr}: {reply}")
 
 if __name__ == "__main__":
     asyncio.run(start_server())
