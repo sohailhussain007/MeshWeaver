@@ -130,5 +130,20 @@ class TestTaskSerializer(unittest.TestCase):
         task = deserialize_task(data)
 
         self.assertEqual(execute_task(task), 20)
+
+    def test_task_with_positional_and_keyword_arguments(self):
+        def calculate_total(price, quantity, discount=0):
+            return (price * quantity) - discount
+
+        data = serialize_task(
+            calculate_total,
+            args=(100, 3),
+            kwargs={"discount": 50},
+        )
+        task = deserialize_task(data)
+
+        self.assertEqual(task["args"], (100, 3))
+        self.assertEqual(task["kwargs"], {"discount": 50})
+        self.assertEqual(execute_task(task), 250)
 if __name__ == "__main__":
     unittest.main()
