@@ -1,14 +1,13 @@
-
 import asyncio
-from dbm import error
 
-from meshweaver.protocol import parse_message
+from meshweaver.protocol import create_message, parse_message
 from meshweaver.serialization import deserialize_task
+
 
 async def start_server():
     loop = asyncio.get_running_loop()
 
-    transport, protocol = await loop.create_datagram_endpoint(
+    transport, _ = await loop.create_datagram_endpoint(
         lambda: UDPServerProtocol(),
         local_addr=("127.0.0.1", 9999),
     )
@@ -27,16 +26,14 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data, addr):
         try:
-            raw_message = data.decode("utf-8")
-            message = parse_message(raw_message)
-
+            message = parse_message(data.decode("utf-8"))
             message_type = message["type"]
             message_data = message["data"]
 
             print(f"Received {message_type} message from {addr}")
 
             if message_type == "PING":
-                reply = "PONG"
+                response = create_message("PONG", {})
 
             elif message_type == "TASK":
                 encoded_task = message_data["task"]
@@ -48,25 +45,35 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
                 try:
                     result = function(*args, **kwargs)
-                    reply = f"RESULT: {result}"
+                    response = create_message(
+                        "TASK_RESULT",
+                        {"result": result},
+                    )
                     print(f"Task executed successfully. Result: {result}")
 
-                except Exception as error:
-                    reply = f"ERROR: Task execution failed: {error}"
-                    print(f"Task execution failed: {error}")
+                except Exception as exc:
+                    response = create_message(
+                        "TASK_ERROR",
+                        {"error": str(exc)},
+                    )
+                    print(f"Task execution failed: {exc}")
 
             else:
-                reply = f"ERROR: Unsupported message type: {message_type}"
+                response = create_message(
+                    "TASK_ERROR",
+                    {"error": f"Unsupported message type: {message_type}"},
+                )
 
-            self.transport.sendto(reply.encode("utf-8"), addr)
-            print(f"Reply sent to {addr}: {reply}")
+        except Exception as exc:
+            print(f"Message processing failed from {addr}: {exc}")
+            response = create_message(
+                "TASK_ERROR",
+                {"error": str(exc)},
+            )
 
-        except (UnicodeDecodeError, ValueError, KeyError, TypeError) as error:
-            print(f"Invalid message from {addr}: {error}")
-            reply = f"ERROR: Invalid message: {error}"
-            self.transport.sendto(reply.encode("utf-8"), addr)
-            print(f"Reply sent to {addr}: {reply}")
+        self.transport.sendto(response.encode("utf-8"), addr)
+        print(f"Reply sent to {addr}: {response}")
+
 
 if __name__ == "__main__":
     asyncio.run(start_server())
-

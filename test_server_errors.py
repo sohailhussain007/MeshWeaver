@@ -1,7 +1,8 @@
-
-import asyncio
+import json
 
 from meshweaver.udp_server import UDPServerProtocol
+from meshweaver.serialization import serialize_task
+from meshweaver.protocol import create_message
 
 
 class FakeTransport:
@@ -17,25 +18,23 @@ def test_task_execution_error():
     transport = FakeTransport()
     protocol.connection_made(transport)
 
-    # A valid TASK message with a missing task field
     message = b'{"type": "TASK", "data": {}}'
     addr = ("127.0.0.1", 12345)
 
     protocol.datagram_received(message, addr)
 
     assert len(transport.sent_messages) == 1
-    assert transport.sent_messages[0][0].startswith("ERROR: Invalid message:")
-    print("Error response verified!")
-    print("Malformed task was rejected without crashing the server!")
+
+    response = json.loads(transport.sent_messages[0][0])
+    assert response["type"] == "TASK_ERROR"
+    assert "error" in response["data"]
+
 
 def divide(a, b):
     return a / b
 
 
 def test_function_execution_error():
-    from meshweaver.serialization import serialize_task
-    from meshweaver.protocol import create_message
-
     protocol = UDPServerProtocol()
     transport = FakeTransport()
     protocol.connection_made(transport)
@@ -47,9 +46,13 @@ def test_function_execution_error():
     protocol.datagram_received(message.encode("utf-8"), addr)
 
     assert len(transport.sent_messages) == 1
-    assert transport.sent_messages[0][0].startswith("ERROR:")
-    print("Function execution error response verified!")
+
+    response = json.loads(transport.sent_messages[0][0])
+    assert response["type"] == "TASK_ERROR"
+    assert response["data"]["error"] == "division by zero"
+
 
 if __name__ == "__main__":
     test_task_execution_error()
     test_function_execution_error()
+    print("Server error tests passed!")
