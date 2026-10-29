@@ -74,3 +74,33 @@ def test_successful_task_execution():
     assert response["type"] == "TASK_RESULT"
     assert response["data"]["result"] == 30
     assert transport.sent_messages[0][1] == addr
+
+def test_malformed_json_packet():
+    protocol = UDPServerProtocol()
+    transport = FakeTransport()
+    protocol.connection_made(transport)
+
+    addr = ("127.0.0.1", 12345)
+    protocol.datagram_received(b"{invalid json}", addr)
+
+    assert len(transport.sent_messages) == 1
+    response = json.loads(transport.sent_messages[0][0])
+    assert response["type"] == "TASK_ERROR"
+    assert "error" in response["data"]
+    assert transport.sent_messages[0][1] == addr
+
+
+def test_unsupported_message_type():
+    protocol = UDPServerProtocol()
+    transport = FakeTransport()
+    protocol.connection_made(transport)
+
+    message = create_message("UNKNOWN", {})
+    addr = ("127.0.0.1", 12345)
+    protocol.datagram_received(message.encode("utf-8"), addr)
+
+    assert len(transport.sent_messages) == 1
+    response = json.loads(transport.sent_messages[0][0])
+    assert response["type"] == "TASK_ERROR"
+    assert "Unsupported message type" in response["data"]["error"]
+    assert transport.sent_messages[0][1] == addr
