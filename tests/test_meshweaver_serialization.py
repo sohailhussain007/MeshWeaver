@@ -1,6 +1,7 @@
 
 import unittest
-
+import base64
+import cloudpickle
 from meshweaver.serialization import serialize_task, deserialize_task
 
 
@@ -40,5 +41,32 @@ class TestMeshWeaverSerialization(unittest.TestCase):
         with self.assertRaises(ValueError):
             deserialize_task("not valid base64!")
 
+    def test_invalid_args_are_rejected(self):
+        with self.assertRaises(TypeError):
+            serialize_task(add, args="not a tuple or list")
+
+    def test_invalid_kwargs_are_rejected(self):
+        with self.assertRaises(TypeError):
+            serialize_task(add, kwargs=["not", "a", "dictionary"])
+
+    def test_non_dictionary_task_is_rejected(self):
+        invalid_task = base64.b64encode(
+            cloudpickle.dumps(["not", "a", "dictionary"])
+        ).decode("ascii")
+
+        with self.assertRaises(ValueError):
+            deserialize_task(invalid_task)
+
+    def test_task_without_function_is_rejected(self):
+        invalid_task = base64.b64encode(
+            cloudpickle.dumps({
+                "args": (),
+                "kwargs": {},
+            })
+        ).decode("ascii")
+
+        with self.assertRaises(ValueError):
+            deserialize_task(invalid_task)
+            
 if __name__ == "__main__":
     unittest.main()
