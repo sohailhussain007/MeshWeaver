@@ -56,3 +56,21 @@ if __name__ == "__main__":
     test_task_execution_error()
     test_function_execution_error()
     print("Server error tests passed!")
+
+def test_successful_task_execution():
+    protocol = UDPServerProtocol()
+    transport = FakeTransport()
+    protocol.connection_made(transport)
+
+    encoded_task = serialize_task(lambda a, b: a + b, args=(10, 20))
+    message = create_message("TASK", {"task": encoded_task})
+    addr = ("127.0.0.1", 12345)
+
+    protocol.datagram_received(message.encode("utf-8"), addr)
+
+    assert len(transport.sent_messages) == 1
+
+    response = json.loads(transport.sent_messages[0][0])
+    assert response["type"] == "TASK_RESULT"
+    assert response["data"]["result"] == 30
+    assert transport.sent_messages[0][1] == addr
