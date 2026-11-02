@@ -31,15 +31,44 @@ class TestPeerRegistry(unittest.TestCase):
         self.registry.register_peer(self.peer)
         result = self.registry.register_peer(self.peer)
         self.assertFalse(result)
+    def test_register_multiple_peers(self):
+        peer2 = Peer(
+            peer_id="node_B",
+            host="127.0.0.1",
+            port=5001
+        )
+        result1 = self.registry.register_peer(self.peer)
+        result2 = self.registry.register_peer(peer2)
+        self.assertTrue(result1)
+        self.assertTrue(result2)
+        self.assertEqual(len(self.registry.get_all_peers()), 2)
+        self.assertEqual(
+            self.registry.get_peer("node_A"),
+            self.peer
+        )
+        self.assertEqual(
+            self.registry.get_peer("node_B"),
+            peer2
+        )
     def test_get_all_peers(self):
+        peer2 = Peer(
+            peer_id="node_B",
+            host="127.0.0.1",
+            port=5001
+        )
         self.registry.register_peer(self.peer)
+        self.registry.register_peer(peer2)
         peers = self.registry.get_all_peers()
-        self.assertEqual(len(peers), 1)
+        self.assertEqual(len(peers), 2)
+        self.assertIn(self.peer, peers)
+        self.assertIn(peer2, peers)
     def test_unregister_peer(self):
         self.registry.register_peer(self.peer)
         result = self.registry.unregister_peer("node_A")
         self.assertTrue(result)
-        self.assertIsNone(self.registry.get_peer("node_A"))
+        self.assertIsNone(
+            self.registry.get_peer("node_A")
+        )
     def test_unregister_unknown_peer(self):
         result = self.registry.unregister_peer("unknown")
         self.assertFalse(result)
@@ -102,6 +131,7 @@ class TestPeerRegistry(unittest.TestCase):
                 message["payload"]["port"] = port
                 with self.assertRaises(ValueError):
                     self.registry.register_hello_message(message)
+
 
 if __name__ == "__main__":
     unittest.main()
