@@ -68,5 +68,59 @@ class TestProtocol(unittest.TestCase):
         invalid_data = b"Hello MeshWeaver"
         with self.assertRaises(json.JSONDecodeError):
             decode_message(invalid_data)
+    def test_valid_hello_message(self):
+        peer = Peer(
+            peer_id="node_A",
+            host="127.0.0.1",
+            port=5000,
+        )
+
+        message = create_hello_message(peer)
+        decoded = decode_message(encode_message(message))
+
+        self.assertEqual(decoded["payload"]["peer_id"], "node_A")
+        self.assertEqual(decoded["payload"]["host"], "127.0.0.1")
+        self.assertEqual(decoded["payload"]["port"], 5000)
+
+    def test_hello_message_missing_peer_id(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO",
+            payload={
+                "host": "127.0.0.1",
+                "port": 5000,
+            },
+        )
+
+        with self.assertRaises(ValueError):
+            decode_message(encode_message(message))
+
+    def test_hello_message_invalid_host(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO",
+            payload={
+                "peer_id": "node_A",
+                "host": "",
+                "port": 5000,
+            },
+        )
+
+        with self.assertRaises(ValueError):
+            decode_message(encode_message(message))
+
+    def test_hello_message_invalid_port(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO",
+            payload={
+                "peer_id": "node_A",
+                "host": "127.0.0.1",
+                "port": 70000,
+            },
+        )
+
+        with self.assertRaises(ValueError):
+            decode_message(encode_message(message))
 if __name__ == "__main__":
     unittest.main()

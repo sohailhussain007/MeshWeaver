@@ -41,6 +41,18 @@ def decode_message(data):
         raise ValueError("message_type must be a non-empty string")
     if not isinstance(message["payload"], dict):
         raise ValueError("payload must be a dictionary")
+    if message["message_type"] == "HELLO":
+        payload = message["payload"]
+
+        if not isinstance(payload.get("peer_id"), str) or not payload["peer_id"]:
+            raise ValueError("HELLO peer_id must be a non-empty string")
+
+        if not isinstance(payload.get("host"), str) or not payload["host"]:
+            raise ValueError("HELLO host must be a non-empty string")
+
+        port = payload.get("port")
+        if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
+            raise ValueError("HELLO port must be between 1 and 65535")
     return message
 if __name__ == "__main__":
     message = create_message(
