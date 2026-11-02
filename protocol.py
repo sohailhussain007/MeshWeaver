@@ -6,7 +6,7 @@ def create_message(sender_id, message_type, payload=None):
         "message_id": str(uuid4()),
         "sender_id": sender_id,
         "message_type": message_type,
-        "payload": payload or {},
+        "payload": {} if payload is None else payload,
     }
 def create_hello_message(peer):
     """Create a HELLO message to announce a peer."""
@@ -35,31 +35,34 @@ def decode_message(data):
     }
     if not required_fields.issubset(message):
         raise ValueError("Message is missing required fields")
-    if not isinstance(message["sender_id"], str) or not message["sender_id"]:
+    if not isinstance(message["message_id"], str) or not message["message_id"].strip():
+        raise ValueError("message_id must be a non-empty string")
+    if not isinstance(message["sender_id"], str) or not message["sender_id"].strip():
         raise ValueError("sender_id must be a non-empty string")
-    if not isinstance(message["message_type"], str) or not message["message_type"]:
+    if not isinstance(message["message_type"], str) or not message["message_type"].strip():
         raise ValueError("message_type must be a non-empty string")
     if not isinstance(message["payload"], dict):
         raise ValueError("payload must be a dictionary")
     if message["message_type"] == "HELLO":
         payload = message["payload"]
-
-        if not isinstance(payload.get("peer_id"), str) or not payload["peer_id"]:
+        if not isinstance(payload.get("peer_id"), str) or not payload["peer_id"].strip():
             raise ValueError("HELLO peer_id must be a non-empty string")
-
-        if not isinstance(payload.get("host"), str) or not payload["host"]:
+        if payload["peer_id"] != message["sender_id"]:
+            raise ValueError("HELLO peer_id must match sender_id")
+        if not isinstance(payload.get("host"), str) or not payload["host"].strip():
             raise ValueError("HELLO host must be a non-empty string")
-
         port = payload.get("port")
         if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
             raise ValueError("HELLO port must be between 1 and 65535")
     return message
 if __name__ == "__main__":
-    message = create_message(
-        sender_id="node_A",
-        message_type="HELLO",
-        payload={"text": "Hello from MeshWeaver!"},
+    from peer import Peer
+    peer = Peer(
+        peer_id="node_A",
+        host="127.0.0.1",
+        port=5000,
     )
+    message = create_hello_message(peer)
     encoded = encode_message(message)
     decoded = decode_message(encoded)
     print("Original message:", message)
