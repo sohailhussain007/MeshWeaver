@@ -44,3 +44,49 @@ def test_udp_server_registers_hello_peer():
     assert response["data"]["peer_id"] == "node_test"
     assert response["data"]["registered"] is True
     assert transport.sent_addr == address
+
+def test_udp_server_registers_multiple_peers():
+    server = UDPServerProtocol()
+    transport = FakeTransport()
+    server.connection_made(transport)
+
+    peers = [
+        Peer(
+            peer_id="node_1",
+            host="127.0.0.1",
+            port=5001,
+        ),
+        Peer(
+            peer_id="node_2",
+            host="127.0.0.1",
+            port=5002,
+        ),
+        Peer(
+            peer_id="node_3",
+            host="127.0.0.1",
+            port=5003,
+        ),
+    ]
+
+    for peer in peers:
+        message = create_hello_message(peer)
+        data = encode_message(message)
+
+        server.datagram_received(
+            data,
+            (peer.host, peer.port),
+        )
+
+    registered_peers = server.peer_registry.get_all_peers()
+
+    assert len(registered_peers) == 3
+
+    registered_ids = {
+        peer.peer_id for peer in registered_peers
+    }
+
+    assert registered_ids == {
+        "node_1",
+        "node_2",
+        "node_3",
+    }

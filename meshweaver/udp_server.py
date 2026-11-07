@@ -7,13 +7,20 @@ from meshweaver.serialization import deserialize_task
 from peer_registry import PeerRegistry
 
 
-async def start_server():
+async def start_server(host="127.0.0.1", port=9999):
     loop = asyncio.get_running_loop()
 
     transport, _ = await loop.create_datagram_endpoint(
         lambda: UDPServerProtocol(),
-        local_addr=("127.0.0.1", 9999),
+        local_addr=(host, port),
     )
+
+    print(f"UDP server started on {host}:{port}")
+
+    try:
+        await asyncio.Future()
+    finally:
+        transport.close()
 
     print("UDP server started on 127.0.0.1:9999")
 

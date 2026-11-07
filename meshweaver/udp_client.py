@@ -96,12 +96,12 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         print(f"UDP error: {exc}")
 
 
-async def main():
+async def main(host="127.0.0.1", port=9999):
     loop = asyncio.get_running_loop()
 
     transport, protocol = await loop.create_datagram_endpoint(
         lambda: UDPClientProtocol(),
-        remote_addr=("127.0.0.1", 9999),
+        remote_addr=(host, port),
     )
 
     try:
