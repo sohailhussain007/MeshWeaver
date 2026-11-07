@@ -1,4 +1,17 @@
+# PyCharm
 .idea/
+
+# Virtual environment
+myenv/
+.venv/
+
+# Python cache
 __pycache__/
 *.py[cod]
-.venv/
+
+# Environment variables
+.env
+
+# Test and coverage files
+.pytest_cache/
+.coverage
