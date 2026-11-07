@@ -1,9 +1,7 @@
 import json
 import unittest
-
 from protocol import create_message, encode_message, decode_message,create_hello_message
 from peer import Peer
-
 class TestProtocol(unittest.TestCase):
     def test_create_message(self):
         message = create_message(
@@ -122,5 +120,118 @@ class TestProtocol(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             decode_message(encode_message(message))
+    def test_create_message_empty_sender_id(self):
+        with self.assertRaises(ValueError):
+            create_message(
+                sender_id="",
+                message_type="HELLO",
+                payload={}
+            )
+
+    def test_create_message_empty_message_type(self):
+        with self.assertRaises(ValueError):
+            create_message(
+                sender_id="node_A",
+                message_type="",
+                payload={}
+            )
+
+    def test_create_message_invalid_payload(self):
+        with self.assertRaises(ValueError):
+            create_message(
+                sender_id="node_A",
+                message_type="HELLO",
+                payload="invalid"
+            )
+
+    def test_create_message_default_payload(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO"
+        )
+        self.assertEqual(message["payload"], {})
+    def test_encode_message_invalid_type(self):
+        with self.assertRaises(ValueError):
+            encode_message("invalid")
+
+    def test_encode_message_missing_fields(self):
+        with self.assertRaises(ValueError):
+            encode_message({"sender_id": "node_A"})
+
+    def test_encode_message_empty_sender_id(self):
+        message = {
+            "message_id": "123",
+            "sender_id": "",
+            "message_type": "HELLO",
+            "payload": {},
+        }
+
+        with self.assertRaises(ValueError):
+            encode_message(message)
+
+    def test_encode_message_invalid_payload(self):
+        message = {
+            "message_id": "123",
+            "sender_id": "node_A",
+            "message_type": "HELLO",
+            "payload": "invalid",
+        }
+
+        with self.assertRaises(ValueError):
+            encode_message(message)
+    def test_encode_hello_message_missing_peer_id(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO",
+            payload={
+                "host": "127.0.0.1",
+                "port": 5000,
+            },
+        )
+
+        with self.assertRaises(ValueError):
+            encode_message(message)
+
+    def test_encode_hello_message_sender_mismatch(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO",
+            payload={
+                "peer_id": "node_B",
+                "host": "127.0.0.1",
+                "port": 5000,
+            },
+        )
+
+        with self.assertRaises(ValueError):
+            encode_message(message)
+
+    def test_encode_hello_message_invalid_host(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO",
+            payload={
+                "peer_id": "node_A",
+                "host": "",
+                "port": 5000,
+            },
+        )
+
+        with self.assertRaises(ValueError):
+            encode_message(message)
+
+    def test_encode_hello_message_invalid_port(self):
+        message = create_message(
+            sender_id="node_A",
+            message_type="HELLO",
+            payload={
+                "peer_id": "node_A",
+                "host": "127.0.0.1",
+                "port": 70000,
+            },
+        )
+
+        with self.assertRaises(ValueError):
+            encode_message(message)
 if __name__ == "__main__":
     unittest.main()
