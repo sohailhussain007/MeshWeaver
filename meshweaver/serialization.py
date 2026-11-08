@@ -5,7 +5,7 @@ import base64
 import binascii
 
 import cloudpickle
-
+import pickle
 
 def serialize_task(function, args=(), kwargs=None):
     """Serialize a function and its arguments as a Base64 string."""
@@ -47,6 +47,7 @@ def deserialize_task(encoded_task):
         AttributeError,
         ImportError,
         IndexError,
+        pickle.UnpicklingError,
     ) as error:
         raise ValueError("Invalid serialized task data") from error
 

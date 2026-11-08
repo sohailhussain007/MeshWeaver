@@ -67,6 +67,12 @@ class TestMeshWeaverSerialization(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             deserialize_task(invalid_task)
+
+    def test_invalid_pickle_data_is_rejected(self):
+        payload = base64.b64encode(b"not a valid pickle").decode("ascii")
+
+        with self.assertRaisesRegex(ValueError, "Invalid serialized task data"):
+            deserialize_task(payload)
             
 if __name__ == "__main__":
     unittest.main()
