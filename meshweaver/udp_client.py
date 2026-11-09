@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import create_hello_message, encode_message
@@ -14,6 +14,7 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
     def __init__(self):
         self.reply_received = asyncio.Event()
+        self.heartbeat_ack_received = asyncio.Event()
         self.transport = None
         self.task_sent = False
         self.hello_received = False
@@ -34,6 +35,15 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.transport.sendto(encode_message(hello_message))
 
         print("HELLO sent:", self.peer)
+
+    def send_heartbeat(self):
+        heartbeat_message = create_message(
+            "HEARTBEAT",
+            {"peer_id": self.peer.peer_id},
+        )
+
+        self.transport.sendto(heartbeat_message.encode("utf-8"))
+        print("Sent HEARTBEAT message")
 
     def send_tasks(self):
         ping_message = create_message(
@@ -68,9 +78,18 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                 if message_data.get("registered") is True:
                     self.hello_received = True
                     print("Peer registration successful!")
+                    self.send_heartbeat()
                     self.send_tasks()
                 else:
                     print("Peer registration failed")
+
+            elif message_type == "HEARTBEAT_ACK":
+                if message_data.get("peer_id") != self.peer.peer_id:
+                    print("HEARTBEAT_ACK peer ID mismatch")
+                    return
+
+                print("Heartbeat acknowledged!")
+                self.heartbeat_ack_received.set()
 
             elif message_type == "PONG":
                 print("Health check passed!")

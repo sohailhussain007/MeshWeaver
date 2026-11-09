@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 
 from meshweaver.protocol import create_message, parse_message
@@ -16,13 +16,6 @@ async def start_server(host="127.0.0.1", port=9999):
     )
 
     print(f"UDP server started on {host}:{port}")
-
-    try:
-        await asyncio.Future()
-    finally:
-        transport.close()
-
-    print("UDP server started on 127.0.0.1:9999")
 
     try:
         await asyncio.Future()
@@ -67,6 +60,20 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
                 if message_type == "PING":
                     response = create_message("PONG", {})
+
+                elif message_type == "HEARTBEAT":
+                    peer_id = message_data.get("peer_id")
+
+                    if not isinstance(peer_id, str) or not peer_id.strip():
+                        response = create_message(
+                            "TASK_ERROR",
+                            {"error": "Invalid heartbeat peer_id"},
+                        )
+                    else:
+                        response = create_message(
+                            "HEARTBEAT_ACK",
+                            {"peer_id": peer_id},
+                        )
 
                 elif message_type == "TASK":
                     task = deserialize_task(message_data["task"])
