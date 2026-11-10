@@ -1,5 +1,6 @@
 ﻿import asyncio
 
+from meshweaver import protocol
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import create_hello_message, encode_message
 from meshweaver.serialization import serialize_task
@@ -12,13 +13,21 @@ def add(a, b):
 
 class UDPClientProtocol(asyncio.DatagramProtocol):
 
-    def __init__(self):
+    def __init__(self, heartbeat_interval=5):
         self.reply_received = asyncio.Event()
         self.heartbeat_ack_received = asyncio.Event()
         self.transport = None
         self.task_sent = False
         self.hello_received = False
         self.peer = None
+
+        self.heartbeat_interval = heartbeat_interval
+        self.heartbeat_task = None
+
+        self.ack_timeout = 2
+        self.missed_heartbeats = 0
+        self.max_missed_heartbeats = 3
+        self.peer_unresponsive = False
 
     def connection_made(self, transport):
         self.transport = transport
@@ -31,7 +40,6 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         )
 
         hello_message = create_hello_message(self.peer)
-
         self.transport.sendto(encode_message(hello_message))
 
         print("HELLO sent:", self.peer)
@@ -45,6 +53,67 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.transport.sendto(heartbeat_message.encode("utf-8"))
         print("Sent HEARTBEAT message")
 
+    async def heartbeat_loop(self):
+        try:
+            while (
+                self.transport is not None
+                and not self.peer_unresponsive
+            ):
+                self.heartbeat_ack_received.clear()
+                sent_at = asyncio.get_running_loop().time()
+
+                self.send_heartbeat()
+
+                try:
+                    await asyncio.wait_for(
+                        self.heartbeat_ack_received.wait(),
+                        timeout=self.ack_timeout,
+                    )
+
+                    self.missed_heartbeats = 0
+                    print("Heartbeat ACK received successfully!")
+
+                except asyncio.TimeoutError:
+                    self.missed_heartbeats += 1
+
+                    print(
+                        f"Heartbeat ACK missed: "
+                        f"{self.missed_heartbeats}/"
+                        f"{self.max_missed_heartbeats}"
+                    )
+
+                    if (
+                        self.missed_heartbeats
+                        >= self.max_missed_heartbeats
+                    ):
+                        self.peer_unresponsive = True
+                        print("Peer is unresponsive!")
+                        break
+
+                remaining = self.heartbeat_interval - (
+                    asyncio.get_running_loop().time() - sent_at
+                )
+
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
+
+        except asyncio.CancelledError:
+            pass
+
+    def start_heartbeat(self):
+        if (
+            self.heartbeat_task is None
+            or self.heartbeat_task.done()
+        ):
+            self.heartbeat_task = asyncio.create_task(
+                self.heartbeat_loop()
+            )
+
+    def stop_heartbeat(self):
+        if self.heartbeat_task is not None:
+            self.heartbeat_task.cancel()
+            self.heartbeat_task = None
+
     def send_tasks(self):
         ping_message = create_message(
             "PING",
@@ -55,7 +124,6 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         print("Sent PING message")
 
         task_data = serialize_task(add, args=(10, 20))
-
         task_message = create_message("TASK", {"task": task_data})
 
         self.transport.sendto(task_message.encode("utf-8"))
@@ -78,7 +146,7 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                 if message_data.get("registered") is True:
                     self.hello_received = True
                     print("Peer registration successful!")
-                    self.send_heartbeat()
+                    self.start_heartbeat()
                     self.send_tasks()
                 else:
                     print("Peer registration failed")
@@ -111,6 +179,10 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         except (UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
             print(f"Invalid server response: {exc}")
 
+    def connection_lost(self, exc):
+        self.transport = None
+        self.stop_heartbeat()
+
     def error_received(self, exc):
         print(f"UDP error: {exc}")
 
@@ -133,6 +205,9 @@ async def main(host="127.0.0.1", port=9999):
         print("Server result timed out")
 
     finally:
+        if hasattr(protocol, "stop_heartbeat"):
+           protocol.stop_heartbeat()
+
         transport.close()
 
 
