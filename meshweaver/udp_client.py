@@ -1,5 +1,6 @@
 ﻿
 import asyncio
+import uuid
 
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import create_hello_message, encode_message
@@ -36,6 +37,9 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.task_retry_count = 0
         self.task_message = None
         self.task_retry_task = None
+
+        # Unique TASK ID
+        self.task_id = None
 
     def connection_made(self, transport):
         self.transport = transport
@@ -145,6 +149,11 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
         print("Sent PING message")
 
+        # Generate a unique ID once for this task
+        self.task_id = str(uuid.uuid4())
+
+        print("Generated TASK ID:", self.task_id)
+
         task_data = serialize_task(
             add,
             args=(10, 20),
@@ -152,7 +161,10 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
         self.task_message = create_message(
             "TASK",
-            {"task": task_data},
+            {
+                "task_id": self.task_id,
+                "task": task_data,
+            },
         )
 
         self.task_retry_count = 0
@@ -175,12 +187,13 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                 if self.transport is None:
                     return
 
+                # Same task message and same task ID on every retry
                 self.transport.sendto(
                     self.task_message.encode("utf-8")
                 )
 
                 print(
-                    f"Sent TASK "
+                    f"Sent TASK ID {self.task_id} "
                     f"(Attempt {attempt + 1}/{total_attempts})"
                 )
 
@@ -261,6 +274,10 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
             elif message_type == "TASK_RESULT":
 
+                if message_data.get("task_id") != self.task_id:
+                    print("TASK_RESULT Task ID mismatch. Ignoring response.")
+                    return
+
                 print(
                     "Task result received:",
                     message_data["result"],
@@ -269,6 +286,10 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                 self.reply_received.set()
 
             elif message_type == "TASK_ERROR":
+
+                if message_data.get("task_id") != self.task_id:
+                    print("TASK_ERROR Task ID mismatch. Ignoring response.")
+                    return
 
                 print(
                     "Task failed:",
@@ -302,7 +323,6 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
 
 # ---------------- CLIENT MAIN ----------------
-
 
 async def main(host="127.0.0.1", port=9999):
 
