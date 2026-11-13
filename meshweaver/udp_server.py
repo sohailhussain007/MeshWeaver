@@ -1,7 +1,6 @@
-﻿
-
 import asyncio
 import json
+import time
 
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import decode_message as decode_peer_message
@@ -27,11 +26,60 @@ async def start_server(host="127.0.0.1", port=9999):
 
 class UDPServerProtocol(asyncio.DatagramProtocol):
 
-    def __init__(self, peer_registry=None):
+    def __init__(
+        self,
+        peer_registry=None,
+        task_cache_ttl=300,
+        max_completed_tasks=1000,
+    ):
+        if task_cache_ttl <= 0:
+            raise ValueError("task_cache_ttl must be greater than 0")
+
+        if max_completed_tasks <= 0:
+            raise ValueError("max_completed_tasks must be greater than 0")
+
         self.peer_registry = peer_registry or PeerRegistry()
 
-        # Cache completed task responses
+        # Cache configuration
+        self.task_cache_ttl = task_cache_ttl
+        self.max_completed_tasks = max_completed_tasks
+
+        # Completed task responses and their completion timestamps
         self.completed_tasks = {}
+        self.task_cache_timestamps = {}
+
+    def cleanup_task_cache(self):
+        """Remove expired cache entries."""
+        now = time.monotonic()
+
+        expired_keys = [
+            key
+            for key, timestamp in self.task_cache_timestamps.items()
+            if now - timestamp >= self.task_cache_ttl
+        ]
+
+        for key in expired_keys:
+            self.completed_tasks.pop(key, None)
+            self.task_cache_timestamps.pop(key, None)
+
+        return len(expired_keys)
+
+    def cache_task_response(self, cache_key, response):
+        """Store a response while respecting the maximum cache size."""
+        self.cleanup_task_cache()
+
+        # Evict oldest entries if cache is full
+        while len(self.completed_tasks) >= self.max_completed_tasks:
+            oldest_key = min(
+                self.task_cache_timestamps,
+                key=self.task_cache_timestamps.get,
+            )
+
+            self.completed_tasks.pop(oldest_key, None)
+            self.task_cache_timestamps.pop(oldest_key, None)
+
+        self.completed_tasks[cache_key] = response
+        self.task_cache_timestamps[cache_key] = time.monotonic()
 
     def connection_made(self, transport):
         self.transport = transport
@@ -69,10 +117,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 # ---------------- PING ----------------
 
                 if message_type == "PING":
-                    response = create_message(
-                        "PONG",
-                        {},
-                    )
+                    response = create_message("PONG", {})
 
                 # ---------------- HEARTBEAT ----------------
 
@@ -87,7 +132,6 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                             "TASK_ERROR",
                             {"error": "Invalid heartbeat peer_id"},
                         )
-
                     else:
                         response = create_message(
                             "HEARTBEAT_ACK",
@@ -99,7 +143,6 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 elif message_type == "TASK":
                     task_id = message_data.get("task_id")
 
-                    # Validate task ID if supplied
                     if task_id is not None and (
                         not isinstance(task_id, str)
                         or not task_id.strip()
@@ -110,12 +153,14 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                         )
 
                     else:
-                        # Separate cache entries by sender and task ID
                         cache_key = (
                             (addr, task_id)
                             if task_id is not None
                             else None
                         )
+
+                        # Remove expired entries before checking cache
+                        self.cleanup_task_cache()
 
                         # Check for duplicate task
                         if (
@@ -158,7 +203,10 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
                             # Cache response only when task ID exists
                             if cache_key is not None:
-                                self.completed_tasks[cache_key] = response
+                                self.cache_task_response(
+                                    cache_key,
+                                    response,
+                                )
 
                 # ---------------- UNKNOWN MESSAGE ----------------
 
@@ -193,5 +241,3 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
 if __name__ == "__main__":
     asyncio.run(start_server())
-
-
