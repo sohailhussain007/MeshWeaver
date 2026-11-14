@@ -12,9 +12,17 @@ def add(a, b):
     return a + b
 
 
+def multiply(a, b):
+    return a * b
+
+
+def subtract(a, b):
+    return a - b
+
+
 class UDPClientProtocol(asyncio.DatagramProtocol):
 
-    def __init__(self, heartbeat_interval=5):
+    def __init__(self, heartbeat_interval=5, auto_submit_demo=False):
         self.reply_received = asyncio.Event()
         self.heartbeat_ack_received = asyncio.Event()
 
@@ -23,23 +31,33 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.hello_received = False
         self.peer = None
 
+        # Demo configuration
+        self.auto_submit_demo = auto_submit_demo
+
         # Heartbeat configuration
         self.heartbeat_interval = heartbeat_interval
-        self.heartbeat_task = None
         self.ack_timeout = 2
-        self.missed_heartbeats = 0
+        self.heartbeat_timeout = self.ack_timeout
         self.max_missed_heartbeats = 3
+        self.missed_heartbeats = 0
         self.peer_unresponsive = False
+        self.heartbeat_task = None
 
-        # TASK retry configuration
+        # Legacy task retry configuration
         self.task_timeout = 2
         self.max_task_retries = 3
         self.task_retry_count = 0
+        self.task_id = None
         self.task_message = None
         self.task_retry_task = None
 
-        # Unique TASK ID
-        self.task_id = None
+        # Multiple task configuration
+        self.pending_tasks = {}
+        self.task_results = {}
+        self.task_errors = {}
+        self.task_retry_tasks = {}
+
+    # ---------------- CONNECTION ----------------
 
     def connection_made(self, transport):
         self.transport = transport
@@ -60,6 +78,9 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
     # ---------------- HEARTBEAT ----------------
 
     def send_heartbeat(self):
+        if self.transport is None or self.peer is None:
+            return
+
         heartbeat_message = create_message(
             "HEARTBEAT",
             {"peer_id": self.peer.peer_id},
@@ -90,6 +111,7 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                     )
 
                     self.missed_heartbeats = 0
+                    self.peer_unresponsive = False
 
                     print("Heartbeat ACK received successfully!")
 
@@ -107,7 +129,6 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                         >= self.max_missed_heartbeats
                     ):
                         self.peer_unresponsive = True
-
                         print("Peer is unresponsive!")
                         break
 
@@ -135,9 +156,12 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             self.heartbeat_task.cancel()
             self.heartbeat_task = None
 
-    # ---------------- TASK SENDING ----------------
+    # ---------------- LEGACY DEMO TASK ----------------
 
     def send_tasks(self):
+        if self.transport is None:
+            return
+
         ping_message = create_message(
             "PING",
             {"node_id": self.peer.peer_id},
@@ -149,10 +173,7 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
         print("Sent PING message")
 
-        # Generate a unique ID once for this task
         self.task_id = str(uuid.uuid4())
-
-        print("Generated TASK ID:", self.task_id)
 
         task_data = serialize_task(
             add,
@@ -187,13 +208,12 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                 if self.transport is None:
                     return
 
-                # Same task message and same task ID on every retry
                 self.transport.sendto(
                     self.task_message.encode("utf-8")
                 )
 
                 print(
-                    f"Sent TASK ID {self.task_id} "
+                    f"Sent TASK "
                     f"(Attempt {attempt + 1}/{total_attempts})"
                 )
 
@@ -226,9 +246,125 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             pass
 
     def stop_task_retry(self):
-        if self.task_retry_task is not None:
+        if (
+            self.task_retry_task is not None
+            and not self.task_retry_task.done()
+        ):
             self.task_retry_task.cancel()
-            self.task_retry_task = None
+
+        self.task_retry_task = None
+
+    # ---------------- MULTIPLE TASK SUBMISSION ----------------
+
+    def submit_task(self, function, args=(), kwargs=None):
+        if self.transport is None:
+            raise RuntimeError("Client is not connected.")
+
+        kwargs = kwargs or {}
+        task_id = str(uuid.uuid4())
+
+        task_data = serialize_task(
+            function,
+            args=args,
+            kwargs=kwargs,
+        )
+
+        task_message = create_message(
+            "TASK",
+            {
+                "task_id": task_id,
+                "task": task_data,
+            },
+        )
+
+        self.pending_tasks[task_id] = {
+            "message": task_message,
+            "event": asyncio.Event(),
+            "retry_count": 0,
+        }
+
+        retry_task = asyncio.create_task(
+            self.send_individual_task_with_retry(task_id)
+        )
+
+        self.task_retry_tasks[task_id] = retry_task
+
+        print(f"Task submitted: {task_id}")
+
+        return task_id
+
+    def submit_tasks(self, tasks):
+        task_ids = []
+
+        for task in tasks:
+            task_id = self.submit_task(
+                function=task["function"],
+                args=task.get("args", ()),
+                kwargs=task.get("kwargs", {}),
+            )
+
+            task_ids.append(task_id)
+
+        return task_ids
+
+    async def send_individual_task_with_retry(self, task_id):
+        task_info = self.pending_tasks.get(task_id)
+
+        if task_info is None:
+            return
+
+        try:
+            total_attempts = self.max_task_retries + 1
+
+            for attempt in range(total_attempts):
+
+                if task_info["event"].is_set():
+                    break
+
+                if self.transport is None:
+                    break
+
+                task_info["retry_count"] = attempt
+
+                print(
+                    f"Task {task_id}: "
+                    f"Attempt {attempt + 1}/{total_attempts}"
+                )
+
+                self.transport.sendto(
+                    task_info["message"].encode("utf-8")
+                )
+
+                try:
+                    await asyncio.wait_for(
+                        task_info["event"].wait(),
+                        timeout=self.task_timeout,
+                    )
+                    break
+
+                except asyncio.TimeoutError:
+
+                    if attempt == self.max_task_retries:
+                        self.task_errors[task_id] = (
+                            "Maximum task retries reached"
+                        )
+
+                        print(
+                            f"Task {task_id}: "
+                            "Maximum retries reached."
+                        )
+
+                    else:
+                        print(
+                            f"Task {task_id} timed out. Retrying..."
+                        )
+
+        except asyncio.CancelledError:
+            pass
+
+        finally:
+            self.task_retry_tasks.pop(task_id, None)
+            self.pending_tasks.pop(task_id, None)
 
     # ---------------- RECEIVE RESPONSES ----------------
 
@@ -243,7 +379,10 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
             if message_type == "HELLO_ACK":
 
-                if message_data.get("peer_id") != self.peer.peer_id:
+                if (
+                    self.peer is None
+                    or message_data.get("peer_id") != self.peer.peer_id
+                ):
                     print("HELLO_ACK peer ID mismatch")
                     return
 
@@ -253,50 +392,68 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                     print("Peer registration successful!")
 
                     self.start_heartbeat()
-                    self.send_tasks()
+
+                    if self.auto_submit_demo:
+                        self.send_tasks()
+                    else:
+                        print("Client ready for task submission.")
 
                 else:
                     print("Peer registration failed")
 
             elif message_type == "HEARTBEAT_ACK":
 
-                if message_data.get("peer_id") != self.peer.peer_id:
+                if (
+                    self.peer is None
+                    or message_data.get("peer_id") != self.peer.peer_id
+                ):
                     print("HEARTBEAT_ACK peer ID mismatch")
                     return
 
                 print("Heartbeat acknowledged!")
-
                 self.heartbeat_ack_received.set()
 
             elif message_type == "PONG":
-
                 print("Health check passed!")
 
             elif message_type == "TASK_RESULT":
 
-                if message_data.get("task_id") != self.task_id:
-                    print("TASK_RESULT Task ID mismatch. Ignoring response.")
+                task_id = message_data.get("task_id")
+                result = message_data.get("result")
+
+                if task_id in self.pending_tasks:
+                    self.task_results[task_id] = result
+                    self.pending_tasks[task_id]["event"].set()
+
+                    print(
+                        f"Task {task_id} result received: {result}"
+                    )
                     return
 
-                print(
-                    "Task result received:",
-                    message_data["result"],
-                )
-
-                self.reply_received.set()
+                if task_id == self.task_id:
+                    print("Task result received:", result)
+                    self.reply_received.set()
 
             elif message_type == "TASK_ERROR":
 
-                if message_data.get("task_id") != self.task_id:
-                    print("TASK_ERROR Task ID mismatch. Ignoring response.")
-                    return
-
-                print(
-                    "Task failed:",
-                    message_data.get("error", "Unknown error"),
+                task_id = message_data.get("task_id")
+                error = message_data.get(
+                    "error",
+                    "Unknown task error",
                 )
 
-                self.reply_received.set()
+                if task_id in self.pending_tasks:
+                    self.task_errors[task_id] = error
+                    self.pending_tasks[task_id]["event"].set()
+
+                    print(
+                        f"Task {task_id} failed: {error}"
+                    )
+                    return
+
+                if task_id == self.task_id:
+                    print("Task failed:", error)
+                    self.reply_received.set()
 
             else:
                 print("Unexpected response:", message)
@@ -307,7 +464,6 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             KeyError,
             TypeError,
         ) as exc:
-
             print(f"Invalid server response: {exc}")
 
     # ---------------- CONNECTION CLEANUP ----------------
@@ -315,8 +471,17 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
     def connection_lost(self, exc):
         self.transport = None
 
+        print("UDP connection closed.")
+
         self.stop_heartbeat()
         self.stop_task_retry()
+
+        for retry_task in list(self.task_retry_tasks.values()):
+            if not retry_task.done():
+                retry_task.cancel()
+
+        self.task_retry_tasks.clear()
+        self.pending_tasks.clear()
 
     def error_received(self, exc):
         print(f"UDP error: {exc}")
@@ -324,28 +489,41 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
 # ---------------- CLIENT MAIN ----------------
 
-async def main(host="127.0.0.1", port=9999):
+async def main(
+    host="127.0.0.1",
+    port=9999,
+    continuous=False,
+    auto_submit_demo=False,
+):
 
     loop = asyncio.get_running_loop()
 
     transport, protocol = await loop.create_datagram_endpoint(
-        lambda: UDPClientProtocol(),
+        lambda: UDPClientProtocol(
+            auto_submit_demo=auto_submit_demo
+        ),
         remote_addr=(host, port),
     )
 
     try:
-        task_timeout = getattr(protocol, "task_timeout", 2)
-        max_retries = getattr(protocol, "max_task_retries", 3)
+        if continuous:
+            print("Client running in continuous mode.")
+            await asyncio.Future()
 
-        total_timeout = task_timeout * (max_retries + 1) + 1
+        else:
+            task_timeout = getattr(protocol, "task_timeout", 2)
+            max_retries = getattr(protocol, "max_task_retries", 3)
 
-        await asyncio.wait_for(
-            protocol.reply_received.wait(),
-            timeout=total_timeout,
-        )
+            total_timeout = task_timeout * (max_retries + 1) + 1
 
-    except asyncio.TimeoutError:
-        print("Server result timed out")
+            try:
+                await asyncio.wait_for(
+                    protocol.reply_received.wait(),
+                    timeout=total_timeout,
+                )
+
+            except asyncio.TimeoutError:
+                print("Server result timed out")
 
     finally:
         if hasattr(protocol, "stop_heartbeat"):
@@ -358,4 +536,13 @@ async def main(host="127.0.0.1", port=9999):
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(
+            main(
+                continuous=True,
+                auto_submit_demo=False,
+            )
+        )
+
+    except KeyboardInterrupt:
+        print("\nClient stopped.")
