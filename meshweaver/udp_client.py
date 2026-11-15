@@ -41,24 +41,42 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             message = parse_message(data.decode("utf-8"))
             message_type = message["type"]
             message_data = message["data"]
+
             if message_type == "HELLO_ACK":
                 print("HELLO_ACK received:", message_data)
+
                 if message_data.get("registered"):
                     self.hello_received = True
                     print("Peer registration successful!")
+
+                    known_peers = message_data.get("peers", [])
+
+                    print("Discovered peers:")
+                    for peer in known_peers:
+                        print(
+                            f"Peer ID: {peer['peer_id']}, "
+                            f"Host: {peer['host']}, "
+                            f"Port: {peer['port']}"
+                        )
+
                     self.send_tasks()
                 else:
                     print("Peer registration failed")
+
             elif message_type == "PONG":
                 print("Health check passed!")
+
             elif message_type == "TASK_RESULT":
                 print("Task result received:", message_data["result"])
                 self.reply_received.set()
+
             elif message_type == "TASK_ERROR":
                 print("Task failed:", message_data.get("error"))
                 self.reply_received.set()
+
             else:
                 print("Unexpected response:", message)
+
         except (UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
             print(f"Invalid server response: {exc}")
     def error_received(self, exc):

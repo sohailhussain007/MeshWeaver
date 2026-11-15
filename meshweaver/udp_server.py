@@ -41,11 +41,22 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                     hello_message
                 )
                 peer_id = hello_message["payload"]["peer_id"]
+
+                if registered:
+                    known_peers = [
+                        peer.to_dict()
+                        for peer in self.peer_registry.get_all_peers()
+                        if peer.peer_id != peer_id
+                    ]
+                else:
+                    known_peers = []
+
                 response = create_network_message(
                     "HELLO_ACK",
                     {
                         "peer_id": peer_id,
                         "registered": registered,
+                        "peers": known_peers,
                     },
                 )
             else:
