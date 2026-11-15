@@ -19,6 +19,7 @@ class TestProtocol(unittest.TestCase):
             peer_id="node_A",
             host="127.0.0.1",
             port=5000,
+
         )
         message = create_hello_message(peer)
         self.assertEqual(message["sender_id"], "node_A")
@@ -29,6 +30,7 @@ class TestProtocol(unittest.TestCase):
                 "peer_id": "node_A",
                 "host": "127.0.0.1",
                 "port": 5000,
+                "node_id": peer.node_id,
             },
         )
 

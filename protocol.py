@@ -25,6 +25,7 @@ def create_hello_message(peer):
             "peer_id": peer.peer_id,
             "host": peer.host,
             "port": peer.port,
+            "node_id": peer.node_id,
         },
     )
 def encode_message(message):
@@ -55,6 +56,13 @@ def encode_message(message):
             raise ValueError("HELLO peer_id must match sender_id")
         if not isinstance(payload.get("host"), str) or not payload["host"].strip():
             raise ValueError("HELLO host must be a non-empty string")
+        node_id = payload.get("node_id")
+        if not isinstance(node_id, str) or len(node_id) != 40:
+            raise ValueError("HELLO node_id must contain 40 hexadecimal characters")
+        try:
+            int(node_id, 16)
+        except ValueError:
+            raise ValueError("HELLO node_id must contain hexadecimal characters")
         port = payload.get("port")
         if (
             not isinstance(port, int)
@@ -92,6 +100,13 @@ def decode_message(data):
             raise ValueError("HELLO peer_id must match sender_id")
         if not isinstance(payload.get("host"), str) or not payload["host"].strip():
             raise ValueError("HELLO host must be a non-empty string")
+        node_id = payload.get("node_id")
+        if not isinstance(node_id, str) or len(node_id) != 40:
+            raise ValueError("HELLO node_id must contain 40 hexadecimal characters")
+        try:
+            int(node_id, 16)
+        except ValueError:
+            raise ValueError("HELLO node_id must contain hexadecimal characters")
         port = payload.get("port")
         if (
             not isinstance(port, int)

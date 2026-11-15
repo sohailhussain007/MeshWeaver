@@ -17,7 +17,8 @@ class TestPeerRegistry(unittest.TestCase):
             payload={
                 "peer_id": "node_B",
                 "host": "192.168.1.10",
-                "port": 5001
+                "port": 5001,
+                "node_id": "a" * 40,
             }
         )
     def test_register_peer(self):

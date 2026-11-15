@@ -30,6 +30,13 @@ class PeerRegistry:
         peer_id = payload.get("peer_id")
         host = payload.get("host")
         port = payload.get("port")
+        node_id = payload.get("node_id")
+        if not isinstance(node_id, str) or len(node_id) != 40:
+            raise ValueError("HELLO node_id must contain 40 hexadecimal characters")
+        try:
+            int(node_id, 16)
+        except ValueError:
+            raise ValueError("HELLO node_id must contain hexadecimal characters")
         if not isinstance(peer_id, str) or not peer_id.strip():
             raise ValueError("HELLO peer_id must be a non-empty string")
         if message.get("sender_id") != peer_id:
@@ -46,5 +53,6 @@ class PeerRegistry:
             peer_id=peer_id,
             host=host,
             port=port,
+            node_id=node_id,
         )
         return self.register_peer(peer)
