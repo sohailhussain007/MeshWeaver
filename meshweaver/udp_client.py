@@ -2,9 +2,12 @@ import asyncio
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.serialization import serialize_task
 from peer import Peer
+from kademlia import RoutingTable
 from protocol import create_hello_message, encode_message
+
 def add(a, b):
     return a + b
+
 class UDPClientProtocol(asyncio.DatagramProtocol):
     def __init__(self):
         self.reply_received = asyncio.Event()
@@ -19,6 +22,7 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             host="127.0.0.1",
             port=local_addr[1],
         )
+        self.routing_table = RoutingTable(self.peer.node_id)
         # Send HELLO first
         hello_message = create_hello_message(self.peer)
         self.transport.sendto(encode_message(hello_message))
@@ -58,6 +62,16 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                             f"Host: {peer['host']}, "
                             f"Port: {peer['port']}"
                         )
+
+                        node_id = peer.get("node_id")
+
+                        if node_id:
+                            added = self.routing_table.add_node(node_id)
+
+                            if added:
+                                print("Peer added to Kademlia routing table!")
+                            else:
+                                print("Peer already exists or could not be added.")
 
                     self.send_tasks()
                 else:
