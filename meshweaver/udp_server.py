@@ -8,6 +8,16 @@ from meshweaver.serialization import deserialize_task
 from peer_registry import PeerRegistry
 
 
+def execute_task_sync(task_data):
+    """Deserialize and execute a synchronous task."""
+    task = deserialize_task(task_data)
+
+    return task["function"](
+        *task["args"],
+        **task["kwargs"]
+    )
+
+
 async def start_server(host="127.0.0.1", port=9999):
     loop = asyncio.get_running_loop()
 
@@ -40,13 +50,14 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
         self.peer_registry = peer_registry or PeerRegistry()
 
-        # Cache configuration
         self.task_cache_ttl = task_cache_ttl
         self.max_completed_tasks = max_completed_tasks
 
-        # Completed task responses and their completion timestamps
         self.completed_tasks = {}
         self.task_cache_timestamps = {}
+
+        # Track tasks currently executing
+        self.in_flight_tasks = {}
 
     def cleanup_task_cache(self):
         """Remove expired cache entries."""
@@ -68,7 +79,6 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         """Store a response while respecting the maximum cache size."""
         self.cleanup_task_cache()
 
-        # Evict oldest entries if cache is full
         while len(self.completed_tasks) >= self.max_completed_tasks:
             oldest_key = min(
                 self.task_cache_timestamps,
@@ -83,6 +93,50 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
     def connection_made(self, transport):
         self.transport = transport
+
+    def _send_response(self, response, addr):
+        if self.transport is not None:
+            self.transport.sendto(
+                response.encode("utf-8"),
+                addr,
+            )
+
+    async def _execute_task(self, message_data, addr, cache_key):
+        """Execute a task independently without blocking the event loop."""
+        task_id = message_data.get("task_id")
+
+        try:
+            result = await asyncio.to_thread(
+                execute_task_sync,
+                message_data["task"],
+            )
+
+            response = create_message(
+                "TASK_RESULT",
+                {
+                    "task_id": task_id,
+                    "result": result,
+                },
+            )
+
+        except Exception as exc:
+            response = create_message(
+                "TASK_ERROR",
+                {
+                    "task_id": task_id,
+                    "error": str(exc),
+                },
+            )
+
+        if cache_key is not None:
+            self.cache_task_response(cache_key, response)
+
+        self._send_response(response, addr)
+
+        if cache_key is not None:
+            self.in_flight_tasks.pop(cache_key, None)
+
+        print(f"Task completed: {task_id}")
 
     def datagram_received(self, data, addr):
         try:
@@ -159,54 +213,43 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                             else None
                         )
 
-                        # Remove expired entries before checking cache
                         self.cleanup_task_cache()
 
-                        # Check for duplicate task
+                        # Check completed task cache
                         if (
                             cache_key is not None
                             and cache_key in self.completed_tasks
                         ):
-                            print(
-                                f"Duplicate task received: {task_id}"
-                            )
+                            print(f"Cached task response: {task_id}")
 
                             response = self.completed_tasks[cache_key]
 
+                        # Check whether the task is already running
+                        elif (
+                            cache_key is not None
+                            and cache_key in self.in_flight_tasks
+                        ):
+                            print(f"Task already running: {task_id}")
+
+                            return
+
                         else:
-                            try:
-                                task = deserialize_task(
-                                    message_data["task"]
-                                )
-
-                                result = task["function"](
-                                    *task["args"],
-                                    **task["kwargs"]
-                                )
-
-                                response = create_message(
-                                    "TASK_RESULT",
-                                    {
-                                        "task_id": task_id,
-                                        "result": result,
-                                    },
-                                )
-
-                            except Exception as exc:
-                                response = create_message(
-                                    "TASK_ERROR",
-                                    {
-                                        "task_id": task_id,
-                                        "error": str(exc),
-                                    },
-                                )
-
-                            # Cache response only when task ID exists
-                            if cache_key is not None:
-                                self.cache_task_response(
+                            # Schedule execution and immediately return
+                            # control to the event loop.
+                            task = asyncio.get_running_loop().create_task(
+                                self._execute_task(
+                                    message_data,
+                                    addr,
                                     cache_key,
-                                    response,
                                 )
+                            )
+
+                            if cache_key is not None:
+                                self.in_flight_tasks[cache_key] = task
+
+                            print(f"Task scheduled: {task_id}")
+
+                            return
 
                 # ---------------- UNKNOWN MESSAGE ----------------
 
@@ -231,13 +274,21 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 {"error": str(exc)},
             )
 
-        # ---------------- SEND RESPONSE ----------------
+        self._send_response(response, addr)
 
-        self.transport.sendto(
-            response.encode("utf-8"),
-            addr,
-        )
+    def connection_lost(self, exc):
+        """Cancel unfinished task coroutines when transport closes."""
+        self.transport = None
+
+        for task in list(self.in_flight_tasks.values()):
+            if not task.done():
+                task.cancel()
+
+        self.in_flight_tasks.clear()
 
 
 if __name__ == "__main__":
-    asyncio.run(start_server())
+    try:
+        asyncio.run(start_server())
+    except KeyboardInterrupt:
+        print("\nUDP server stopped.")

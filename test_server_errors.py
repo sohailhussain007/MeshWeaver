@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from meshweaver.udp_server import UDPServerProtocol
@@ -13,67 +14,100 @@ class FakeTransport:
         self.sent_messages.append((data.decode("utf-8"), addr))
 
 
-def test_task_execution_error():
-    protocol = UDPServerProtocol()
-    transport = FakeTransport()
-    protocol.connection_made(transport)
-
-    message = b'{"type": "TASK", "data": {}}'
-    addr = ("127.0.0.1", 12345)
-
-    protocol.datagram_received(message, addr)
-
-    assert len(transport.sent_messages) == 1
-
-    response = json.loads(transport.sent_messages[0][0])
-    assert response["type"] == "TASK_ERROR"
-    assert "error" in response["data"]
-
-
 def divide(a, b):
     return a / b
 
 
+async def send_and_wait(protocol, transport, message, addr):
+    previous_count = len(transport.sent_messages)
+
+    protocol.datagram_received(
+        message.encode("utf-8"),
+        addr,
+    )
+
+    async def wait_for_response():
+        while len(transport.sent_messages) <= previous_count:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(wait_for_response(), timeout=3)
+
+    return json.loads(
+        transport.sent_messages[-1][0]
+    )
+
+
+def test_task_execution_error():
+    async def run_test():
+        protocol = UDPServerProtocol()
+        transport = FakeTransport()
+        protocol.connection_made(transport)
+
+        message = '{"type": "TASK", "data": {}}'
+        addr = ("127.0.0.1", 12345)
+
+        response = await send_and_wait(
+            protocol,
+            transport,
+            message,
+            addr,
+        )
+
+        assert response["type"] == "TASK_ERROR"
+        assert "error" in response["data"]
+
+    asyncio.run(run_test())
+
+
 def test_function_execution_error():
-    protocol = UDPServerProtocol()
-    transport = FakeTransport()
-    protocol.connection_made(transport)
+    async def run_test():
+        protocol = UDPServerProtocol()
+        transport = FakeTransport()
+        protocol.connection_made(transport)
 
-    encoded_task = serialize_task(divide, args=(10, 0))
-    message = create_message("TASK", {"task": encoded_task})
-    addr = ("127.0.0.1", 12345)
+        encoded_task = serialize_task(divide, args=(10, 0))
+        message = create_message("TASK", {"task": encoded_task})
+        addr = ("127.0.0.1", 12345)
 
-    protocol.datagram_received(message.encode("utf-8"), addr)
+        response = await send_and_wait(
+            protocol,
+            transport,
+            message,
+            addr,
+        )
 
-    assert len(transport.sent_messages) == 1
+        assert response["type"] == "TASK_ERROR"
+        assert response["data"]["error"] == "division by zero"
 
-    response = json.loads(transport.sent_messages[0][0])
-    assert response["type"] == "TASK_ERROR"
-    assert response["data"]["error"] == "division by zero"
+    asyncio.run(run_test())
 
-
-if __name__ == "__main__":
-    test_task_execution_error()
-    test_function_execution_error()
-    print("Server error tests passed!")
 
 def test_successful_task_execution():
-    protocol = UDPServerProtocol()
-    transport = FakeTransport()
-    protocol.connection_made(transport)
+    async def run_test():
+        protocol = UDPServerProtocol()
+        transport = FakeTransport()
+        protocol.connection_made(transport)
 
-    encoded_task = serialize_task(lambda a, b: a + b, args=(10, 20))
-    message = create_message("TASK", {"task": encoded_task})
-    addr = ("127.0.0.1", 12345)
+        encoded_task = serialize_task(
+            lambda a, b: a + b,
+            args=(10, 20),
+        )
+        message = create_message("TASK", {"task": encoded_task})
+        addr = ("127.0.0.1", 12345)
 
-    protocol.datagram_received(message.encode("utf-8"), addr)
+        response = await send_and_wait(
+            protocol,
+            transport,
+            message,
+            addr,
+        )
 
-    assert len(transport.sent_messages) == 1
+        assert response["type"] == "TASK_RESULT"
+        assert response["data"]["result"] == 30
+        assert transport.sent_messages[-1][1] == addr
 
-    response = json.loads(transport.sent_messages[0][0])
-    assert response["type"] == "TASK_RESULT"
-    assert response["data"]["result"] == 30
-    assert transport.sent_messages[0][1] == addr
+    asyncio.run(run_test())
+
 
 def test_malformed_json_packet():
     protocol = UDPServerProtocol()
@@ -84,7 +118,9 @@ def test_malformed_json_packet():
     protocol.datagram_received(b"{invalid json}", addr)
 
     assert len(transport.sent_messages) == 1
+
     response = json.loads(transport.sent_messages[0][0])
+
     assert response["type"] == "TASK_ERROR"
     assert "error" in response["data"]
     assert transport.sent_messages[0][1] == addr
@@ -97,10 +133,16 @@ def test_unsupported_message_type():
 
     message = create_message("UNKNOWN", {})
     addr = ("127.0.0.1", 12345)
-    protocol.datagram_received(message.encode("utf-8"), addr)
+
+    protocol.datagram_received(
+        message.encode("utf-8"),
+        addr,
+    )
 
     assert len(transport.sent_messages) == 1
+
     response = json.loads(transport.sent_messages[0][0])
+
     assert response["type"] == "TASK_ERROR"
     assert "Unsupported message type" in response["data"]["error"]
     assert transport.sent_messages[0][1] == addr
