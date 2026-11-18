@@ -4,9 +4,11 @@ from unittest.mock import patch
 
 from cli_utils import (
     display_node_status,
+    display_peer_info,
     display_received_task,
     display_task_result,
 )
+from peer import Peer
 
 
 class TestCLI(unittest.TestCase):
@@ -21,6 +23,24 @@ class TestCLI(unittest.TestCase):
 
         self.assertIn("node-01", output)
         self.assertIn("Running", output)
+
+    @patch("builtins.print")
+    def test_display_peer_info(self, mock_print):
+        peer = Peer(
+            peer_id="node-01",
+            host="127.0.0.1",
+            port=5000
+        )
+
+        display_peer_info(peer)
+
+        output = "\n".join(
+            str(call.args[0]) for call in mock_print.call_args_list
+        )
+
+        self.assertIn("node-01", output)
+        self.assertIn("127.0.0.1", output)
+        self.assertIn("5000", output)
 
     @patch("builtins.print")
     def test_display_received_task(self, mock_print):
