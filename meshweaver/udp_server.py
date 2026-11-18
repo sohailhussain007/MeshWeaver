@@ -24,6 +24,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             peer_registry if peer_registry is not None
             else PeerRegistry()
         )
+        self.peer_addresses = {}
     def connection_made(self, transport):
         self.transport = transport
     def datagram_received(self, data, addr):
@@ -32,25 +33,45 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             message_data = json.loads(raw_message)
             # Handle HELLO messages from Peer Protocol
             if (
-                isinstance(message_data, dict)
-                and message_data.get("message_type") == "HELLO"
+                    isinstance(message_data, dict)
+                    and message_data.get("message_type") == "HELLO"
             ):
                 hello_message = decode_peer_message(data)
-
+                # Save peers that were already registered
+                existing_peers = self.peer_registry.get_all_peers()
                 registered = self.peer_registry.register_hello_message(
                     hello_message
                 )
                 peer_id = hello_message["payload"]["peer_id"]
-
                 if registered:
+                    # Store the new peer's actual UDP address
+                    self.peer_addresses[peer_id] = addr
                     known_peers = [
                         peer.to_dict()
                         for peer in self.peer_registry.get_all_peers()
                         if peer.peer_id != peer_id
                     ]
+                    # Notify previously registered peers
+                    new_peer = self.peer_registry.get_peer(peer_id)
+                    notification = create_network_message(
+                        "PEER_JOINED",
+                        {"peer": new_peer.to_dict()},
+                    )
+                    for existing_peer in existing_peers:
+                        existing_addr = self.peer_addresses.get(
+                            existing_peer.peer_id
+                        )
+                        if existing_addr:
+                            self.transport.sendto(
+                                notification.encode("utf-8"),
+                                existing_addr,
+                            )
+                            print(
+                                f"PEER_JOINED notification sent to "
+                                f"{existing_peer.peer_id}"
+                            )
                 else:
                     known_peers = []
-
                 response = create_network_message(
                     "HELLO_ACK",
                     {

@@ -45,16 +45,12 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             message = parse_message(data.decode("utf-8"))
             message_type = message["type"]
             message_data = message["data"]
-
             if message_type == "HELLO_ACK":
                 print("HELLO_ACK received:", message_data)
-
                 if message_data.get("registered"):
                     self.hello_received = True
                     print("Peer registration successful!")
-
                     known_peers = message_data.get("peers", [])
-
                     print("Discovered peers:")
                     for peer in known_peers:
                         print(
@@ -62,24 +58,28 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                             f"Host: {peer['host']}, "
                             f"Port: {peer['port']}"
                         )
-
                         node_id = peer.get("node_id")
-
                         if node_id:
                             added = self.routing_table.add_node(node_id)
-
                             if added:
                                 print("Peer added to Kademlia routing table!")
                             else:
                                 print("Peer already exists or could not be added.")
-
                     self.send_tasks()
                 else:
                     print("Peer registration failed")
-
+            elif message_type == "PEER_JOINED":
+                new_peer = message_data.get("peer", {})
+                print("New peer joined:", new_peer)
+                node_id = new_peer.get("node_id")
+                if node_id:
+                    added = self.routing_table.add_node(node_id)
+                    if added:
+                        print("New peer added to Kademlia routing table!")
+                    else:
+                        print("Peer already exists or could not be added.")
             elif message_type == "PONG":
                 print("Health check passed!")
-
             elif message_type == "TASK_RESULT":
                 print("Task result received:", message_data["result"])
                 self.reply_received.set()
@@ -102,15 +102,10 @@ async def main():
         remote_addr=("127.0.0.1", 9999),
     )
     try:
-        await asyncio.wait_for(
-            protocol.reply_received.wait(),
-            timeout=5,
-        )
-    except asyncio.TimeoutError:
-        print("Server result timed out")
+        print("Client listening for peer notifications for 60 seconds...")
+        await asyncio.sleep(60)
     finally:
         transport.close()
-
-
+        print("Client connection closed.")
 if __name__ == "__main__":
     asyncio.run(main())
