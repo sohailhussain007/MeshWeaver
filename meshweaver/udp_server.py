@@ -1,4 +1,6 @@
-﻿import asyncio
+﻿
+
+import asyncio
 import json
 import time
 
@@ -41,6 +43,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         peer_registry=None,
         task_cache_ttl=300,
         max_completed_tasks=1000,
+        max_concurrent_tasks=10,
     ):
         if task_cache_ttl <= 0:
             raise ValueError("task_cache_ttl must be greater than 0")
@@ -48,19 +51,34 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         if max_completed_tasks <= 0:
             raise ValueError("max_completed_tasks must be greater than 0")
 
+        if (
+            not isinstance(max_concurrent_tasks, int)
+            or isinstance(max_concurrent_tasks, bool)
+            or max_concurrent_tasks <= 0
+        ):
+            raise ValueError(
+                "max_concurrent_tasks must be a positive integer"
+            )
+
+        self.transport = None
         self.peer_registry = peer_registry or PeerRegistry()
 
         self.task_cache_ttl = task_cache_ttl
         self.max_completed_tasks = max_completed_tasks
+        self.max_concurrent_tasks = max_concurrent_tasks
 
+        # Completed task responses and timestamps
         self.completed_tasks = {}
         self.task_cache_timestamps = {}
 
-        # Track tasks currently executing
+        # Track tasks currently executing by Task ID
         self.in_flight_tasks = {}
 
+        # Track all active tasks
+        self.active_tasks = set()
+
     def cleanup_task_cache(self):
-        """Remove expired cache entries."""
+        """Remove expired cache entries and return the number removed."""
         now = time.monotonic()
 
         expired_keys = [
@@ -95,6 +113,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         self.transport = transport
 
     def _send_response(self, response, addr):
+        """Send a response if the UDP transport is available."""
         if self.transport is not None:
             self.transport.sendto(
                 response.encode("utf-8"),
@@ -137,6 +156,12 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             print(f"Task completed: {task_id}")
 
         finally:
+            # Always clean up task tracking
+            current_task = asyncio.current_task()
+
+            if current_task is not None:
+                self.active_tasks.discard(current_task)
+
             if cache_key is not None:
                 self.in_flight_tasks.pop(cache_key, None)
 
@@ -173,7 +198,10 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 # ---------------- PING ----------------
 
                 if message_type == "PING":
-                    response = create_message("PONG", {})
+                    response = create_message(
+                        "PONG",
+                        {},
+                    )
 
                 # ---------------- HEARTBEAT ----------------
 
@@ -188,6 +216,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                             "TASK_ERROR",
                             {"error": "Invalid heartbeat peer_id"},
                         )
+
                     else:
                         response = create_message(
                             "HEARTBEAT_ACK",
@@ -232,12 +261,32 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                             and cache_key in self.in_flight_tasks
                         ):
                             print(f"Task already running: {task_id}")
-
                             return
 
+                        # Enforce maximum concurrent task limit
+                        elif (
+                            len(self.active_tasks)
+                            >= self.max_concurrent_tasks
+                        ):
+                            print(
+                                "Task rejected: maximum concurrent "
+                                "task limit reached."
+                            )
+
+                            response = create_message(
+                                "TASK_ERROR",
+                                {
+                                    "task_id": task_id,
+                                    "error": (
+                                        "Server is busy: maximum "
+                                        "concurrent task limit reached "
+                                        f"({self.max_concurrent_tasks})."
+                                    ),
+                                },
+                            )
+
                         else:
-                            # Schedule execution and immediately return
-                            # control to the event loop.
+                            # Schedule task execution
                             task = asyncio.get_running_loop().create_task(
                                 self._execute_task(
                                     message_data,
@@ -246,10 +295,18 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                                 )
                             )
 
+                            # Track every active task
+                            self.active_tasks.add(task)
+
+                            # Track Task ID for duplicate prevention
                             if cache_key is not None:
                                 self.in_flight_tasks[cache_key] = task
 
-                            print(f"Task scheduled: {task_id}")
+                            print(
+                                f"Task scheduled: {task_id} "
+                                f"({len(self.active_tasks)}/"
+                                f"{self.max_concurrent_tasks} active)"
+                            )
 
                             return
 
@@ -282,10 +339,11 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         """Cancel unfinished task coroutines when transport closes."""
         self.transport = None
 
-        for task in list(self.in_flight_tasks.values()):
+        for task in list(self.active_tasks):
             if not task.done():
                 task.cancel()
 
+        self.active_tasks.clear()
         self.in_flight_tasks.clear()
 
 
