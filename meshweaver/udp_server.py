@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import json
 import time
 
@@ -106,37 +106,39 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         task_id = message_data.get("task_id")
 
         try:
-            result = await asyncio.to_thread(
-                execute_task_sync,
-                message_data["task"],
-            )
+            try:
+                result = await asyncio.to_thread(
+                    execute_task_sync,
+                    message_data["task"],
+                )
 
-            response = create_message(
-                "TASK_RESULT",
-                {
-                    "task_id": task_id,
-                    "result": result,
-                },
-            )
+                response = create_message(
+                    "TASK_RESULT",
+                    {
+                        "task_id": task_id,
+                        "result": result,
+                    },
+                )
 
-        except Exception as exc:
-            response = create_message(
-                "TASK_ERROR",
-                {
-                    "task_id": task_id,
-                    "error": str(exc),
-                },
-            )
+            except Exception as exc:
+                response = create_message(
+                    "TASK_ERROR",
+                    {
+                        "task_id": task_id,
+                        "error": str(exc),
+                    },
+                )
 
-        if cache_key is not None:
-            self.cache_task_response(cache_key, response)
+            if cache_key is not None:
+                self.cache_task_response(cache_key, response)
 
-        self._send_response(response, addr)
+            self._send_response(response, addr)
 
-        if cache_key is not None:
-            self.in_flight_tasks.pop(cache_key, None)
+            print(f"Task completed: {task_id}")
 
-        print(f"Task completed: {task_id}")
+        finally:
+            if cache_key is not None:
+                self.in_flight_tasks.pop(cache_key, None)
 
     def datagram_received(self, data, addr):
         try:

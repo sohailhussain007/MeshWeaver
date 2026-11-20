@@ -1,5 +1,8 @@
+
 import asyncio
 import time
+import threading
+from unittest.mock import patch
 
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.udp_server import UDPServerProtocol
@@ -80,13 +83,8 @@ def test_server_executes_tasks_concurrently():
 
             server_module.deserialize_task = fake_deserialize
 
-            client_transport.sendto(
-                slow_message.encode("utf-8")
-            )
-
-            client_transport.sendto(
-                fast_message.encode("utf-8")
-            )
+            client_transport.sendto(slow_message.encode("utf-8"))
+            client_transport.sendto(fast_message.encode("utf-8"))
 
             await asyncio.wait_for(
                 wait_for_responses(responses),
@@ -95,7 +93,6 @@ def test_server_executes_tasks_concurrently():
 
             assert responses["fast-task"]["data"]["result"] == "fast"
             assert responses["slow-task"]["data"]["result"] == "slow"
-
             assert list(responses.keys())[0] == "fast-task"
 
         finally:
@@ -107,5 +104,60 @@ def test_server_executes_tasks_concurrently():
     async def wait_for_responses(responses):
         while len(responses) < 2:
             await asyncio.sleep(0.01)
+
+    asyncio.run(run_test())
+
+
+def test_cancelled_task_is_removed_from_in_flight():
+
+    async def run_test():
+        protocol = UDPServerProtocol()
+
+        cache_key = (("127.0.0.1", 5000), "cancel-task")
+
+        started = threading.Event()
+        release = threading.Event()
+
+        protocol.in_flight_tasks[cache_key] = None
+
+        def blocking_task(task_data):
+            started.set()
+            release.wait(timeout=5)
+            return "completed"
+
+        try:
+            with patch(
+                "meshweaver.udp_server.execute_task_sync",
+                side_effect=blocking_task,
+            ):
+                task = asyncio.create_task(
+                    protocol._execute_task(
+                        {
+                            "task_id": "cancel-task",
+                            "task": "test",
+                        },
+                        ("127.0.0.1", 5000),
+                        cache_key,
+                    )
+                )
+
+                started_successfully = await asyncio.to_thread(
+                    started.wait,
+                    2,
+                )
+
+                assert started_successfully
+
+                task.cancel()
+
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+                assert cache_key not in protocol.in_flight_tasks
+
+        finally:
+            release.set()
 
     asyncio.run(run_test())
