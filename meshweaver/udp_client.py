@@ -15,6 +15,7 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.hello_received = False
     def connection_made(self, transport):
         self.transport = transport
+        self.heartbeat_task = None
         # Get the actual local UDP port
         local_addr = transport.get_extra_info("sockname")
         # Create this client's peer identity
@@ -27,14 +28,18 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         hello_message = create_hello_message(self.peer)
         self.transport.sendto(encode_message(hello_message))
         print("HELLO sent:", self.peer)
-    def send_tasks(self):
-        # Send PING
+    def send_heartbeat(self):
         ping_message = create_message(
             "PING",
-            {"node_id": self.peer.peer_id},
+            {"node_id": self.peer.node_id},
         )
         self.transport.sendto(ping_message.encode("utf-8"))
-        print("Sent PING message")
+        print("Heartbeat PING sent")
+    async def heartbeat_loop(self):
+        while True:
+            self.send_heartbeat()
+            await asyncio.sleep(5)
+    def send_tasks(self):
         # Send TASK
         task_data = serialize_task(add, args=(10, 20))
         task_message = create_message("TASK", {"task": task_data})
@@ -65,6 +70,11 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                                 print("Peer added to Kademlia routing table!")
                             else:
                                 print("Peer already exists or could not be added.")
+                    # Start heartbeat after peer discovery
+                    if self.heartbeat_task is None:
+                        self.heartbeat_task = asyncio.create_task(
+                            self.heartbeat_loop()
+                        )
                     self.send_tasks()
                 else:
                     print("Peer registration failed")
@@ -78,21 +88,30 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                         print("New peer added to Kademlia routing table!")
                     else:
                         print("Peer already exists or could not be added.")
+            elif message_type == "PEER_LEFT":
+                peer_id = message_data.get("peer_id")
+                node_id = message_data.get("node_id")
+                print(f"Peer went offline: {peer_id}")
+                if node_id:
+                    self.routing_table.remove_node(node_id)
+                    print("Offline peer removed from routing table!")
             elif message_type == "PONG":
                 print("Health check passed!")
             elif message_type == "TASK_RESULT":
                 print("Task result received:", message_data["result"])
                 self.reply_received.set()
-
             elif message_type == "TASK_ERROR":
                 print("Task failed:", message_data.get("error"))
                 self.reply_received.set()
-
             else:
                 print("Unexpected response:", message)
-
         except (UnicodeDecodeError, ValueError, KeyError, TypeError) as exc:
             print(f"Invalid server response: {exc}")
+    def stop_heartbeat(self):
+        if self.heartbeat_task is not None:
+            self.heartbeat_task.cancel()
+            self.heartbeat_task = None
+            print("Heartbeat stopped")
     def error_received(self, exc):
         print(f"UDP error: {exc}")
 async def main():
@@ -105,6 +124,7 @@ async def main():
         print("Client listening for peer notifications for 60 seconds...")
         await asyncio.sleep(60)
     finally:
+        protocol.stop_heartbeat()
         transport.close()
         print("Client connection closed.")
 if __name__ == "__main__":
