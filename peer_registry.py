@@ -3,6 +3,7 @@ class PeerRegistry:
     """Manages discovered peers in the MeshWeaver network."""
     def __init__(self):
         self.peers = {}
+        self.cpu_loads = {}
     def register_peer(self, peer):
         """Register a new peer."""
         if peer.peer_id in self.peers:
@@ -17,6 +18,7 @@ class PeerRegistry:
         return list(self.peers.values())
     def unregister_peer(self, peer_id):
         """Remove a registered peer."""
+        self.cpu_loads.pop(peer_id, None)
         return self.peers.pop(peer_id, None) is not None
     def register_hello_message(self, message):
         """Register a peer from a validated HELLO message."""
@@ -56,3 +58,28 @@ class PeerRegistry:
             node_id=node_id,
         )
         return self.register_peer(peer)
+    def update_cpu_load(self, peer_id, cpu_load):
+        """Update the CPU load of a registered peer."""
+        if peer_id not in self.peers:
+            return False
+        if (
+                not isinstance(cpu_load, (int, float))
+                or isinstance(cpu_load, bool)
+                or not 0 <= cpu_load <= 100
+        ):
+            raise ValueError("CPU load must be between 0 and 100")
+        self.cpu_loads[peer_id] = float(cpu_load)
+        return True
+    def select_lowest_cpu_peer(self):
+        """Select the available peer with the lowest CPU load."""
+        available_peers = [
+            peer_id for peer_id in self.cpu_loads
+            if peer_id in self.peers
+        ]
+        if not available_peers:
+            return None
+        selected_peer_id = min(
+            available_peers,
+            key=lambda peer_id: self.cpu_loads[peer_id]
+        )
+        return self.peers[selected_peer_id]

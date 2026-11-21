@@ -120,11 +120,33 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 )
                 if message_type == "PING":
                     node_id = message_data.get("node_id")
+                    cpu_load = message_data.get("cpu_load")
                     for peer_id, peer_addr in self.peer_addresses.items():
                         if peer_addr == addr:
                             self.last_seen[peer_id] = (
                                 asyncio.get_running_loop().time()
                             )
+                            if cpu_load is not None:
+                                updated = self.peer_registry.update_cpu_load(
+                                    peer_id,
+                                    cpu_load,
+                                )
+                                if updated:
+                                    print(
+                                        f"CPU load updated for {peer_id}: "
+                                        f"{cpu_load}%"
+                                    )
+                                    selected_peer = (
+                                        self.peer_registry.select_lowest_cpu_peer()
+                                    )
+                                    if selected_peer:
+                                        selected_load = self.peer_registry.cpu_loads[
+                                            selected_peer.peer_id
+                                        ]
+                                        print(
+                                            f"Selected peer: {selected_peer.peer_id} "
+                                            f"(CPU Load: {selected_load}%)"
+                                        )
                             break
                     response = create_network_message("PONG", {})
                 elif message_type == "TASK":
@@ -171,4 +193,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         )
         print(f"Reply sent to {addr}: {response}")
 if __name__ == "__main__":
-    asyncio.run(start_server())
+    try:
+        asyncio.run(start_server())
+    except KeyboardInterrupt:
+        print("\nUDP Server stopped safely.")

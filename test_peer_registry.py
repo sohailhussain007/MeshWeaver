@@ -132,7 +132,54 @@ class TestPeerRegistry(unittest.TestCase):
                 message["payload"]["port"] = port
                 with self.assertRaises(ValueError):
                     self.registry.register_hello_message(message)
-
-
+    def test_update_cpu_load(self):
+        self.registry.register_peer(self.peer)
+        result = self.registry.update_cpu_load(
+            "node_A",
+            35.5
+        )
+        self.assertTrue(result)
+        self.assertEqual(
+            self.registry.cpu_loads["node_A"],
+            35.5
+        )
+    def test_reject_invalid_cpu_load(self):
+        self.registry.register_peer(self.peer)
+        invalid_loads = [-1, 101, "50", None, True]
+        for cpu_load in invalid_loads:
+            with self.subTest(cpu_load=cpu_load):
+                with self.assertRaises(ValueError):
+                    self.registry.update_cpu_load(
+                        "node_A",
+                        cpu_load
+                    )
+    def test_update_unknown_peer_cpu_load(self):
+        result = self.registry.update_cpu_load(
+            "unknown",
+            30
+        )
+        self.assertFalse(result)
+    def test_select_lowest_cpu_peer(self):
+        peer2 = Peer(
+            peer_id="node_B",
+            host="127.0.0.1",
+            port=5001
+        )
+        peer3 = Peer(
+            peer_id="node_C",
+            host="127.0.0.1",
+            port=5002
+        )
+        self.registry.register_peer(self.peer)
+        self.registry.register_peer(peer2)
+        self.registry.register_peer(peer3)
+        self.registry.update_cpu_load("node_A", 75)
+        self.registry.update_cpu_load("node_B", 25)
+        self.registry.update_cpu_load("node_C", 50)
+        selected_peer = self.registry.select_lowest_cpu_peer()
+        self.assertEqual(selected_peer, peer2)
+    def test_select_peer_without_cpu_data(self):
+        result = self.registry.select_lowest_cpu_peer()
+        self.assertIsNone(result)
 if __name__ == "__main__":
     unittest.main()

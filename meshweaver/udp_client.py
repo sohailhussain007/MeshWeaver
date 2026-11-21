@@ -1,4 +1,5 @@
 import asyncio
+import psutil
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.serialization import serialize_task
 from peer import Peer
@@ -29,9 +30,13 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.transport.sendto(encode_message(hello_message))
         print("HELLO sent:", self.peer)
     def send_heartbeat(self):
+        cpu_load = psutil.cpu_percent(interval=None)
+
         ping_message = create_message(
             "PING",
-            {"node_id": self.peer.node_id},
+            {"node_id": self.peer.node_id,
+             "cpu_load": cpu_load,
+             },
         )
         self.transport.sendto(ping_message.encode("utf-8"))
         print("Heartbeat PING sent")
@@ -123,9 +128,14 @@ async def main():
     try:
         print("Client listening for peer notifications for 60 seconds...")
         await asyncio.sleep(60)
+    except asyncio.CancelledError:
+        pass
     finally:
         protocol.stop_heartbeat()
         transport.close()
         print("Client connection closed.")
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nClient stopped safely.")
