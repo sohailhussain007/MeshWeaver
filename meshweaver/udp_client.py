@@ -1,4 +1,4 @@
-﻿
+
 import asyncio
 import uuid
 
@@ -469,6 +469,7 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
     # ---------------- CONNECTION CLEANUP ----------------
 
     def connection_lost(self, exc):
+        """Clean up pending tasks when the UDP connection closes."""
         self.transport = None
 
         print("UDP connection closed.")
@@ -476,6 +477,12 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.stop_heartbeat()
         self.stop_task_retry()
 
+        # Record an error for every pending task
+        for task_id, task_info in list(self.pending_tasks.items()):
+            self.task_errors[task_id] = "Client connection lost"
+            task_info["event"].set()
+
+        # Cancel all individual retry tasks
         for retry_task in list(self.task_retry_tasks.values()):
             if not retry_task.done():
                 retry_task.cancel()

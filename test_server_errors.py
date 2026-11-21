@@ -146,3 +146,71 @@ def test_unsupported_message_type():
     assert response["type"] == "TASK_ERROR"
     assert "Unsupported message type" in response["data"]["error"]
     assert transport.sent_messages[0][1] == addr
+
+
+def test_missing_task_payload():
+    async def run_test():
+        protocol = UDPServerProtocol()
+        transport = FakeTransport()
+        protocol.connection_made(transport)
+
+        message = create_message("TASK", {})
+        addr = ("127.0.0.1", 12345)
+
+        response = await send_and_wait(
+            protocol, transport, message, addr
+        )
+
+        assert response["type"] == "TASK_ERROR"
+        assert "error" in response["data"]
+
+    asyncio.run(run_test())
+
+
+def test_invalid_serialized_task():
+    async def run_test():
+        protocol = UDPServerProtocol()
+        transport = FakeTransport()
+        protocol.connection_made(transport)
+
+        message = create_message(
+            "TASK",
+            {"task": "this-is-not-a-valid-serialized-task"},
+        )
+        addr = ("127.0.0.1", 12345)
+
+        response = await send_and_wait(
+            protocol, transport, message, addr
+        )
+
+        assert response["type"] == "TASK_ERROR"
+        assert "error" in response["data"]
+
+    asyncio.run(run_test())
+
+
+def test_invalid_task_id():
+    protocol = UDPServerProtocol()
+    transport = FakeTransport()
+    protocol.connection_made(transport)
+
+    message = create_message(
+        "TASK",
+        {
+            "task_id": "",
+            "task": "dummy-task",
+        },
+    )
+    addr = ("127.0.0.1", 12345)
+
+    protocol.datagram_received(
+        message.encode("utf-8"),
+        addr,
+    )
+
+    assert len(transport.sent_messages) == 1
+
+    response = json.loads(transport.sent_messages[0][0])
+
+    assert response["type"] == "TASK_ERROR"
+    assert response["data"]["error"] == "Invalid task_id"
