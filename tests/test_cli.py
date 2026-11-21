@@ -9,6 +9,7 @@ from cli_utils import (
     display_task_result,
 )
 from peer import Peer
+from peer_manager import PeerManager
 
 
 class TestCLI(unittest.TestCase):
@@ -62,6 +63,30 @@ class TestCLI(unittest.TestCase):
         )
 
         self.assertIn("30", output)
+
+    def test_cli_add_peer(self):
+        manager = PeerManager()
+        peer = Peer(peer_id="node-101", port=5000)
+
+        self.assertTrue(manager.add_peer(peer))
+        self.assertEqual(manager.get_peer("node-101"), peer)
+
+    def test_cli_search_peer(self):
+        manager = PeerManager()
+        peer = Peer(peer_id="node-102", port=5001)
+
+        manager.add_peer(peer)
+
+        self.assertEqual(manager.get_peer("node-102"), peer)
+
+    def test_cli_remove_peer(self):
+        manager = PeerManager()
+        peer = Peer(peer_id="node-103", port=5002)
+
+        manager.add_peer(peer)
+
+        self.assertTrue(manager.remove_peer("node-103"))
+        self.assertIsNone(manager.get_peer("node-103"))
 
 
 if __name__ == "__main__":
