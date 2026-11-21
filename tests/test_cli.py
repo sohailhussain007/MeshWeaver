@@ -2,6 +2,7 @@
 import unittest
 from unittest.mock import patch
 
+from cli import main
 from cli_utils import (
     display_node_status,
     display_peer_info,
@@ -13,6 +14,21 @@ from peer_manager import PeerManager
 
 
 class TestCLI(unittest.TestCase):
+
+    @patch("builtins.print")
+    def test_main_execution(self, mock_print):
+        main()
+
+        output = "\n".join(
+            str(call.args[0]) for call in mock_print.call_args_list
+        )
+
+        self.assertIn("Peer added to PeerManager successfully!", output)
+        self.assertIn("Peer found successfully!", output)
+        self.assertIn("Peer removed successfully!", output)
+        self.assertIn("Running", output)
+        self.assertIn("Completed", output)
+        self.assertIn("30", output)
 
     @patch("builtins.print")
     def test_display_node_status(self, mock_print):
