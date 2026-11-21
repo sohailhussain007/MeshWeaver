@@ -1,4 +1,4 @@
-﻿
+
 
 import asyncio
 import json
@@ -44,6 +44,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         task_cache_ttl=300,
         max_completed_tasks=1000,
         max_concurrent_tasks=10,
+        task_timeout=30,
     ):
         if task_cache_ttl <= 0:
             raise ValueError("task_cache_ttl must be greater than 0")
@@ -59,6 +60,15 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             raise ValueError(
                 "max_concurrent_tasks must be a positive integer"
             )
+
+        if (
+            not isinstance(task_timeout, (int, float))
+            or isinstance(task_timeout, bool)
+            or task_timeout <= 0
+        ):
+            raise ValueError("task_timeout must be a positive number")
+
+        self.task_timeout = task_timeout
 
         self.transport = None
         self.peer_registry = peer_registry or PeerRegistry()
@@ -76,6 +86,36 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
         # Track all active tasks
         self.active_tasks = set()
+
+        # Track task lifecycle and execution history
+        self.task_history = {}
+
+    def _set_task_status(self, task_id, status, **details):
+        """Create or update a task lifecycle record."""
+        if task_id is None:
+            return
+
+        if task_id not in self.task_history:
+            self.task_history[task_id] = {
+                "task_id": task_id,
+                "status": "PENDING",
+                "created_at": time.time(),
+                "started_at": None,
+                "completed_at": None,
+                "result": None,
+                "error": None,
+            }
+
+        record = self.task_history[task_id]
+        record["status"] = status
+
+        if status == "RUNNING":
+            record["started_at"] = time.time()
+
+        if status in ("COMPLETED", "FAILED", "CANCELLED", "TIMED_OUT"):
+            record["completed_at"] = time.time()
+
+        record.update(details)
 
     def cleanup_task_cache(self):
         """Remove expired cache entries and return the number removed."""
@@ -120,15 +160,50 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 addr,
             )
 
+    def cancel_task(self, task_id):
+        """Cancel a running task by its Task ID."""
+        if not isinstance(task_id, str) or not task_id.strip():
+            return False
+
+        for cache_key, task in list(self.in_flight_tasks.items()):
+            if cache_key[1] != task_id:
+                continue
+
+            if task.done():
+                return False
+
+            self._set_task_status(
+                task_id,
+                "CANCELLED",
+                error="Task cancelled by request",
+            )
+
+            task.cancel()
+            print(f"Task cancellation requested: {task_id}")
+            return True
+
+        return False
+
     async def _execute_task(self, message_data, addr, cache_key):
-        """Execute a task independently without blocking the event loop."""
+        """Execute a task and update its lifecycle status."""
         task_id = message_data.get("task_id")
+
+        self._set_task_status(task_id, "RUNNING")
 
         try:
             try:
-                result = await asyncio.to_thread(
-                    execute_task_sync,
-                    message_data["task"],
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        execute_task_sync,
+                        message_data["task"],
+                    ),
+                    timeout=self.task_timeout,
+                )
+
+                self._set_task_status(
+                    task_id,
+                    "COMPLETED",
+                    result=result,
                 )
 
                 response = create_message(
@@ -139,7 +214,33 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                     },
                 )
 
+            except asyncio.TimeoutError:
+                error = (
+                    f"Task execution timed out after "
+                    f"{self.task_timeout} seconds"
+                )
+
+                self._set_task_status(
+                    task_id,
+                    "TIMED_OUT",
+                    error=error,
+                )
+
+                response = create_message(
+                    "TASK_ERROR",
+                    {
+                        "task_id": task_id,
+                        "error": error,
+                    },
+                )
+
             except Exception as exc:
+                self._set_task_status(
+                    task_id,
+                    "FAILED",
+                    error=str(exc),
+                )
+
                 response = create_message(
                     "TASK_ERROR",
                     {
@@ -156,7 +257,6 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             print(f"Task completed: {task_id}")
 
         finally:
-            # Always clean up task tracking
             current_task = asyncio.current_task()
 
             if current_task is not None:
@@ -286,6 +386,9 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                             )
 
                         else:
+                            # Record the task before execution starts
+                            self._set_task_status(task_id, "PENDING")
+
                             # Schedule task execution
                             task = asyncio.get_running_loop().create_task(
                                 self._execute_task(
