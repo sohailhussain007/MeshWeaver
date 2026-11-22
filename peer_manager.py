@@ -48,4 +48,18 @@ class PeerManager:
         removed_count = self.get_peer_count()
         self.peers.clear()
         return removed_count
-    
+
+    def search_peers(self, host=None, port=None):
+        """Search peers by host, port, or both."""
+        results = []
+
+        for peer in self.peers.values():
+            if host is not None and peer.host != host:
+                continue
+
+            if port is not None and peer.port != port:
+                continue
+
+            results.append(peer)
+
+        return results

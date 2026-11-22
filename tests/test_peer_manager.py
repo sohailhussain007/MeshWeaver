@@ -72,6 +72,30 @@ class TestPeerManager(unittest.TestCase):
         self.assertEqual(removed_count, 0)
         self.assertEqual(self.manager.get_peer_count(), 0)
 
+    def test_search_peers_by_host(self):
+        self.manager.add_peer(self.peer1)
+        self.manager.add_peer(self.peer2)
+
+        results = self.manager.search_peers(host="127.0.0.1")
+
+        self.assertEqual(len(results), 2)
+
+    def test_search_peers_by_port(self):
+        self.manager.add_peer(self.peer1)
+        self.manager.add_peer(self.peer2)
+
+        results = self.manager.search_peers(port=5000)
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0], self.peer1)
+
+    def test_search_peers_no_match(self):
+        self.manager.add_peer(self.peer1)
+
+        results = self.manager.search_peers(host="192.168.1.1")
+
+        self.assertEqual(results, [])
+
 
 if __name__ == "__main__":
     unittest.main()
