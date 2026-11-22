@@ -15,6 +15,10 @@ class TestPeerManager(unittest.TestCase):
         self.assertTrue(self.manager.add_peer(self.peer1))
         self.assertEqual(len(self.manager.get_all_peers()), 1)
 
+    def test_add_invalid_peer(self):
+        with self.assertRaises(TypeError):
+            self.manager.add_peer("invalid-peer")
+
     def test_duplicate_peer(self):
         self.manager.add_peer(self.peer1)
 
@@ -23,16 +27,19 @@ class TestPeerManager(unittest.TestCase):
 
     def test_get_peer(self):
         self.manager.add_peer(self.peer1)
-
         result = self.manager.get_peer("peer-101")
         self.assertEqual(result, self.peer1)
 
     def test_get_missing_peer(self):
         self.assertIsNone(self.manager.get_peer("unknown"))
 
+    def test_has_peer(self):
+        self.manager.add_peer(self.peer1)
+        self.assertTrue(self.manager.has_peer("peer-101"))
+        self.assertFalse(self.manager.has_peer("unknown"))
+
     def test_remove_peer(self):
         self.manager.add_peer(self.peer1)
-
         self.assertTrue(self.manager.remove_peer("peer-101"))
         self.assertEqual(len(self.manager.get_all_peers()), 0)
 
@@ -42,9 +49,14 @@ class TestPeerManager(unittest.TestCase):
     def test_get_all_peers(self):
         self.manager.add_peer(self.peer1)
         self.manager.add_peer(self.peer2)
-
         result = self.manager.get_all_peers()
         self.assertEqual(len(result), 2)
+
+    def test_get_peer_count(self):
+        self.assertEqual(self.manager.get_peer_count(), 0)
+        self.manager.add_peer(self.peer1)
+        self.manager.add_peer(self.peer2)
+        self.assertEqual(self.manager.get_peer_count(), 2)
 
 
 if __name__ == "__main__":
