@@ -3,6 +3,7 @@
 import asyncio
 import json
 import time
+import uuid
 
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import decode_message as decode_peer_message
@@ -47,6 +48,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         max_completed_tasks=1000,
         max_concurrent_tasks=10,
         task_timeout=30,
+        peer_timeout=45,
     ):
         if task_cache_ttl <= 0:
             raise ValueError("task_cache_ttl must be greater than 0")
@@ -72,8 +74,19 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
         self.task_timeout = task_timeout
 
+        if (
+            not isinstance(peer_timeout, (int, float))
+            or isinstance(peer_timeout, bool)
+            or peer_timeout <= 0
+        ):
+            raise ValueError("peer_timeout must be a positive number")
+
+        self.peer_timeout = peer_timeout
+
         self.transport = None
         self.peer_registry = peer_registry or PeerRegistry()
+        self.peer_addresses = {}
+        self.distributed_tasks = {}
         self.local_node_id = None
         self.routing_table = None
 
@@ -202,20 +215,90 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         return False
 
     async def _execute_task(self, message_data, addr, cache_key):
-        """Execute a task and update its lifecycle status."""
+        """Execute locally or forward to the lowest-CPU available peer."""
         task_id = message_data.get("task_id")
+        dispatch_id = None
 
         self._set_task_status(task_id, "RUNNING")
 
         try:
             try:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        execute_task_sync,
-                        message_data["task"],
+                requester_peer_id = next(
+                    (
+                        peer_id
+                        for peer_id, peer_addr in self.peer_addresses.items()
+                        if peer_addr == addr
                     ),
-                    timeout=self.task_timeout,
+                    None,
                 )
+
+                candidates = [
+                    peer_id
+                    for peer_id in self.peer_registry.cpu_loads
+                    if (
+                        peer_id in self.peer_registry.peers
+                        and peer_id in self.peer_addresses
+                        and peer_id != requester_peer_id
+                    )
+                ]
+
+                if candidates:
+                    selected_peer_id = min(
+                        candidates,
+                        key=lambda peer_id:
+                            self.peer_registry.cpu_loads[peer_id],
+                    )
+                    worker_addr = self.peer_addresses[selected_peer_id]
+                    dispatch_id = str(uuid.uuid4())
+                    future = asyncio.get_running_loop().create_future()
+
+                    self.distributed_tasks[dispatch_id] = {
+                        "task_id": task_id,
+                        "worker_id": selected_peer_id,
+                        "future": future,
+                    }
+
+                    forward_message = create_message(
+                        "TASK_FORWARD",
+                        {
+                            "dispatch_id": dispatch_id,
+                            "task_id": task_id,
+                            "task": message_data["task"],
+                        },
+                    )
+
+                    self._send_response(forward_message, worker_addr)
+
+                    print(
+                        f"Task {task_id} forwarded to "
+                        f"{selected_peer_id} "
+                        f"(CPU: "
+                        f"{self.peer_registry.cpu_loads[selected_peer_id]}%)"
+                    )
+
+                    success, worker_result = await asyncio.wait_for(
+                        future,
+                        timeout=self.task_timeout,
+                    )
+
+                    if not success:
+                        raise RuntimeError(worker_result)
+
+                    result = worker_result
+
+                else:
+                    print(
+                        f"No eligible worker for task {task_id}; "
+                        "executing locally."
+                    )
+
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            execute_task_sync,
+                            message_data["task"],
+                        ),
+                        timeout=self.task_timeout,
+                    )
 
                 self._set_task_status(
                     task_id,
@@ -236,19 +319,14 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                     f"Task execution timed out after "
                     f"{self.task_timeout} seconds"
                 )
-
                 self._set_task_status(
                     task_id,
                     "TIMED_OUT",
                     error=error,
                 )
-
                 response = create_message(
                     "TASK_ERROR",
-                    {
-                        "task_id": task_id,
-                        "error": error,
-                    },
+                    {"task_id": task_id, "error": error},
                 )
 
             except Exception as exc:
@@ -257,30 +335,39 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                     "FAILED",
                     error=str(exc),
                 )
-
                 response = create_message(
                     "TASK_ERROR",
-                    {
-                        "task_id": task_id,
-                        "error": str(exc),
-                    },
+                    {"task_id": task_id, "error": str(exc)},
                 )
 
             if cache_key is not None:
                 self.cache_task_response(cache_key, response)
 
             self._send_response(response, addr)
-
             print(f"Task completed: {task_id}")
 
         finally:
-            current_task = asyncio.current_task()
+            if dispatch_id is not None:
+                self.distributed_tasks.pop(dispatch_id, None)
 
+            current_task = asyncio.current_task()
             if current_task is not None:
                 self.active_tasks.discard(current_task)
 
             if cache_key is not None:
                 self.in_flight_tasks.pop(cache_key, None)
+
+    def _cleanup_stale_peers(self):
+        """Remove peers that have stopped sending heartbeats."""
+        stale_peer_ids = self.peer_registry.remove_stale_peers(
+            self.peer_timeout
+        )
+
+        for peer_id in stale_peer_ids:
+            self.peer_addresses.pop(peer_id, None)
+            print(f"Removed stale peer: {peer_id}")
+
+        return stale_peer_ids
 
     def datagram_received(self, data, addr):
         try:
@@ -297,6 +384,9 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 registered = self.peer_registry.register_hello_message(
                     hello_message
                 )
+
+                peer_id = hello_message["payload"]["peer_id"]
+                self.peer_addresses[peer_id] = addr
 
                 if self.routing_table is not None:
                     peer_id = hello_message["payload"]["peer_id"]
@@ -331,21 +421,100 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
                 elif message_type == "HEARTBEAT":
                     peer_id = message_data.get("peer_id")
+                    cpu_load = message_data.get("cpu_load")
 
-                    if (
-                        not isinstance(peer_id, str)
-                        or not peer_id.strip()
-                    ):
+                    # Validate peer identity
+                    if not isinstance(peer_id, str) or not peer_id.strip():
                         response = create_message(
                             "TASK_ERROR",
                             {"error": "Invalid heartbeat peer_id"},
                         )
 
+                    # Verify sender address belongs to this peer
+                    elif self.peer_addresses.get(peer_id) != addr:
+                        print(f"Rejected HEARTBEAT from unverified peer: {peer_id}")
+                        return
+
+                    # Validate CPU load
+                    elif (
+                        not isinstance(cpu_load, (int, float))
+                        or isinstance(cpu_load, bool)
+                        or not 0 <= cpu_load <= 100
+                    ):
+                        print(f"Rejected invalid CPU load from {peer_id}")
+                        return
+
                     else:
+                        # Refresh this peer before checking other stale peers.
+                        self.peer_registry.update_last_seen(peer_id)
+
+                        # Remove peers whose heartbeat has expired.
+                        self._cleanup_stale_peers()
+
+                        updated = self.peer_registry.update_cpu_load(
+                            peer_id,
+                            cpu_load,
+                        )
+
+                        if updated:
+                            selected_peer = (
+                                self.peer_registry.select_lowest_cpu_peer()
+                            )
+
+                            print(
+                                f"CPU load updated: {peer_id} = {cpu_load}%"
+                            )
+
+                            if selected_peer is not None:
+                                selected_load = self.peer_registry.cpu_loads[
+                                    selected_peer.peer_id
+                                ]
+                                print(
+                                    f"Lowest CPU peer: {selected_peer.peer_id} "
+                                    f"({selected_load}%)"
+                                )
+
                         response = create_message(
                             "HEARTBEAT_ACK",
                             {"peer_id": peer_id},
                         )
+
+                # -------- FORWARDED WORKER RESULT --------
+
+                elif message_type in (
+                    "TASK_FORWARD_RESULT",
+                    "TASK_FORWARD_ERROR",
+                ):
+                    dispatch_id = message_data.get("dispatch_id")
+                    worker_id = message_data.get("worker_id")
+                    record = self.distributed_tasks.get(dispatch_id)
+
+                    if (
+                        record is None
+                        or record["worker_id"] != worker_id
+                        or self.peer_addresses.get(worker_id) != addr
+                    ):
+                        print("Rejected unknown or unauthorised worker result")
+                        return
+
+                    future = record["future"]
+
+                    if not future.done():
+                        if message_type == "TASK_FORWARD_RESULT":
+                            future.set_result(
+                                (True, message_data.get("result"))
+                            )
+                        else:
+                            future.set_result(
+                                (
+                                    False,
+                                    message_data.get(
+                                        "error",
+                                        "Worker execution failed",
+                                    ),
+                                )
+                            )
+                    return
 
                 # ---------------- TASK ----------------
 
@@ -472,6 +641,14 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
         self.active_tasks.clear()
         self.in_flight_tasks.clear()
+
+        for record in self.distributed_tasks.values():
+            future = record["future"]
+            if not future.done():
+                future.cancel()
+
+        self.distributed_tasks.clear()
+        self.peer_addresses.clear()
 
 
 if __name__ == "__main__":

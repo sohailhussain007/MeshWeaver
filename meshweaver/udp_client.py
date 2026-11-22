@@ -1,10 +1,11 @@
 
 import asyncio
+import psutil
 import uuid
 
 from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import create_hello_message, encode_message
-from meshweaver.serialization import serialize_task
+from meshweaver.serialization import serialize_task, deserialize_task
 from peer import Peer
 
 
@@ -81,16 +82,21 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         if self.transport is None or self.peer is None:
             return
 
+        cpu_load = psutil.cpu_percent(interval=None)
+
         heartbeat_message = create_message(
             "HEARTBEAT",
-            {"peer_id": self.peer.peer_id},
+            {
+                "peer_id": self.peer.peer_id,
+                "cpu_load": cpu_load,
+            },
         )
 
         self.transport.sendto(
             heartbeat_message.encode("utf-8")
         )
 
-        print("Sent HEARTBEAT message")
+        print(f"Sent HEARTBEAT: CPU load {cpu_load}%")
 
     async def heartbeat_loop(self):
         try:
@@ -366,6 +372,52 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             self.task_retry_tasks.pop(task_id, None)
             self.pending_tasks.pop(task_id, None)
 
+    async def _execute_forwarded_task(self, message_data):
+        """Execute a task forwarded by the central server."""
+        dispatch_id = message_data.get("dispatch_id")
+        task_id = message_data.get("task_id")
+
+        try:
+            if (
+                not isinstance(dispatch_id, str)
+                or not isinstance(task_id, str)
+                or not isinstance(message_data.get("task"), str)
+            ):
+                raise ValueError("Invalid forwarded task")
+
+            def execute():
+                task = deserialize_task(message_data["task"])
+                return task["function"](
+                    *task["args"],
+                    **task["kwargs"],
+                )
+
+            result = await asyncio.to_thread(execute)
+
+            response = create_message(
+                "TASK_FORWARD_RESULT",
+                {
+                    "dispatch_id": dispatch_id,
+                    "task_id": task_id,
+                    "worker_id": self.peer.peer_id,
+                    "result": result,
+                },
+            )
+
+        except Exception as exc:
+            response = create_message(
+                "TASK_FORWARD_ERROR",
+                {
+                    "dispatch_id": dispatch_id,
+                    "task_id": task_id,
+                    "worker_id": self.peer.peer_id if self.peer else "",
+                    "error": str(exc),
+                },
+            )
+
+        if self.transport is not None:
+            self.transport.sendto(response.encode("utf-8"))
+
     # ---------------- RECEIVE RESPONSES ----------------
 
     def datagram_received(self, data, addr):
@@ -377,7 +429,13 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             message_type = message["type"]
             message_data = message["data"]
 
-            if message_type == "HELLO_ACK":
+            if message_type == "TASK_FORWARD":
+                asyncio.create_task(
+                    self._execute_forwarded_task(message_data)
+                )
+                return
+
+            elif message_type == "HELLO_ACK":
 
                 if (
                     self.peer is None
