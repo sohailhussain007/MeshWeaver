@@ -11,12 +11,18 @@ class TestPeer(unittest.TestCase):
         self.assertEqual(peer.port, 5000)
 
     def test_peer_to_dict(self):
-        peer = Peer(peer_id="node_A", host="127.0.0.1", port=5000)
-        self.assertEqual(peer.to_dict(), {
-            "peer_id": "node_A",
-            "host": "127.0.0.1",
-            "port": 5000,
-        })
+      peer = Peer(
+        peer_id="node_A",
+        host="127.0.0.1",
+        port=5000,
+      )
+
+      info = peer.to_dict()
+
+      self.assertEqual(info["peer_id"], "node_A")
+      self.assertEqual(info["node_id"], peer.node_id)
+      self.assertEqual(info["host"], "127.0.0.1")
+      self.assertEqual(info["port"], 5000)
 
     def test_invalid_ports(self):
         for port in [-1, 65536, "5000", True]:

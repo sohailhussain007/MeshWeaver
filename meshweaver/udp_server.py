@@ -8,6 +8,8 @@ from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import decode_message as decode_peer_message
 from meshweaver.serialization import deserialize_task
 from peer_registry import PeerRegistry
+from peer import Peer
+from kademlia import RoutingTable
 
 
 def execute_task_sync(task_data):
@@ -72,6 +74,8 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
         self.transport = None
         self.peer_registry = peer_registry or PeerRegistry()
+        self.local_node_id = None
+        self.routing_table = None
 
         self.task_cache_ttl = task_cache_ttl
         self.max_completed_tasks = max_completed_tasks
@@ -151,6 +155,19 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
     def connection_made(self, transport):
         self.transport = transport
+
+        get_extra_info = getattr(transport, "get_extra_info", None)
+        local_address = (
+            get_extra_info("sockname")
+            if callable(get_extra_info)
+            else None
+        )
+
+        if local_address:
+            host, port = local_address[:2]
+            self.local_peer = Peer(host=host, port=port)
+            self.local_node_id = self.local_peer.node_id
+            self.routing_table = RoutingTable(self.local_node_id)
 
     def _send_response(self, response, addr):
         """Send a response if the UDP transport is available."""
@@ -280,6 +297,13 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 registered = self.peer_registry.register_hello_message(
                     hello_message
                 )
+
+                if self.routing_table is not None:
+                    peer_id = hello_message["payload"]["peer_id"]
+                    registered_peer = self.peer_registry.get_peer(peer_id)
+
+                    if registered_peer is not None:
+                        self.routing_table.add_node(registered_peer.node_id)
 
                 response = create_message(
                     "HELLO_ACK",
