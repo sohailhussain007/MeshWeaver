@@ -2,6 +2,7 @@
 from cli_utils import (
     display_node_status,
     display_peer_info,
+    display_peer_list,
     display_received_task,
     display_task_result,
 )
@@ -33,7 +34,7 @@ def main():
 
     # Display all peers
     all_peers = manager.get_all_peers()
-    print("All peers:", all_peers)
+    display_peer_list(all_peers)
 
     # Remove peer from PeerManager
     removed = manager.remove_peer(peer.peer_id)
