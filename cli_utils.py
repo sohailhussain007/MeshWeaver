@@ -1,3 +1,4 @@
+
 def display_node_status(node_id, status):
     print("\n========== MeshWeaver ==========")
     print(f"Node ID : {node_id}")
@@ -24,3 +25,19 @@ def display_task_result(result):
     print("\n---------- Task Result -----------")
     print(f"Result  : {result}")
     print("----------------------------------")
+
+
+def display_peer_list(peers):
+    """Display all registered peers."""
+    print("\n========== Registered Peers ==========")
+
+    if not peers:
+        print("No peers registered.")
+    else:
+        for index, peer in enumerate(peers, start=1):
+            print(f"\nPeer {index}")
+            print(f"Peer ID : {peer.peer_id}")
+            print(f"Host    : {peer.host}")
+            print(f"Port    : {peer.port}")
+
+    print("======================================")

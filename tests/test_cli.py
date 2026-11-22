@@ -6,6 +6,7 @@ from cli import main
 from cli_utils import (
     display_node_status,
     display_peer_info,
+    display_peer_list,
     display_received_task,
     display_task_result,
 )
@@ -58,6 +59,32 @@ class TestCLI(unittest.TestCase):
         self.assertIn("node-01", output)
         self.assertIn("127.0.0.1", output)
         self.assertIn("5000", output)
+
+    @patch("builtins.print")
+    def test_display_peer_list(self, mock_print):
+        peer1 = Peer(peer_id="peer-101", port=5000)
+        peer2 = Peer(peer_id="peer-102", port=5001)
+
+        display_peer_list([peer1, peer2])
+
+        output = "\n".join(
+            str(call.args[0]) for call in mock_print.call_args_list
+        )
+
+        self.assertIn("peer-101", output)
+        self.assertIn("peer-102", output)
+        self.assertIn("Peer 1", output)
+        self.assertIn("Peer 2", output)
+
+    @patch("builtins.print")
+    def test_display_empty_peer_list(self, mock_print):
+        display_peer_list([])
+
+        output = "\n".join(
+            str(call.args[0]) for call in mock_print.call_args_list
+        )
+
+        self.assertIn("No peers registered.", output)
 
     @patch("builtins.print")
     def test_display_received_task(self, mock_print):
