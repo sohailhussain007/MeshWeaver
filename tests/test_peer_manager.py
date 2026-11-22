@@ -21,7 +21,6 @@ class TestPeerManager(unittest.TestCase):
 
     def test_duplicate_peer(self):
         self.manager.add_peer(self.peer1)
-
         with self.assertRaises(ValueError):
             self.manager.add_peer(self.peer1)
 
@@ -57,6 +56,21 @@ class TestPeerManager(unittest.TestCase):
         self.manager.add_peer(self.peer1)
         self.manager.add_peer(self.peer2)
         self.assertEqual(self.manager.get_peer_count(), 2)
+
+    def test_clear_all_peers(self):
+        self.manager.add_peer(self.peer1)
+        self.manager.add_peer(self.peer2)
+
+        removed_count = self.manager.clear_all_peers()
+
+        self.assertEqual(removed_count, 2)
+        self.assertEqual(self.manager.get_peer_count(), 0)
+
+    def test_clear_empty_peer_manager(self):
+        removed_count = self.manager.clear_all_peers()
+
+        self.assertEqual(removed_count, 0)
+        self.assertEqual(self.manager.get_peer_count(), 0)
 
 
 if __name__ == "__main__":

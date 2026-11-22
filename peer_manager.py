@@ -42,3 +42,10 @@ class PeerManager:
     def get_peer_count(self):
         """Return the total number of registered peers."""
         return len(self.peers)
+
+    def clear_all_peers(self):
+        """Remove all registered peers and return the removed count."""
+        removed_count = self.get_peer_count()
+        self.peers.clear()
+        return removed_count
+    
