@@ -136,3 +136,25 @@ class PeerRegistry:
             key=lambda peer_id: self.cpu_loads[peer_id]
         )
         return self.peers[selected_peer_id]
+
+    def has_peer(self, peer_id):
+        return peer_id in self.peers
+
+    def get_peer_count(self):
+        return len(self.peers)
+
+    def clear_all_peers(self):
+        removed_count = self.get_peer_count()
+        for peer_id in list(self.peers):
+            self.unregister_peer(peer_id)
+        return removed_count
+
+    def search_peers(self, host=None, port=None):
+        results = []
+        for peer in self.peers.values():
+            if host is not None and peer.host != host:
+                continue
+            if port is not None and peer.port != port:
+                continue
+            results.append(peer)
+        return results
