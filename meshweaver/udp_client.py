@@ -7,6 +7,7 @@ from meshweaver.protocol import create_message, parse_message
 from meshweaver.peer_protocol import create_hello_message, encode_message
 from meshweaver.serialization import serialize_task, deserialize_task
 from peer import Peer
+from kademlia import RoutingTable
 
 
 def add(a, b):
@@ -31,6 +32,8 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
         self.task_sent = False
         self.hello_received = False
         self.peer = None
+        self.routing_table = None
+        self.discovered_peers = {}
 
         # Demo configuration
         self.auto_submit_demo = auto_submit_demo
@@ -69,6 +72,8 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
             host="127.0.0.1",
             port=local_addr[1],
         )
+
+        self.routing_table = RoutingTable(self.peer.node_id)
 
         hello_message = create_hello_message(self.peer)
 
@@ -447,7 +452,30 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
                 if message_data.get("registered") is True:
                     self.hello_received = True
 
-                    print("Peer registration successful!")
+                    for peer_data in message_data.get("peers", []):
+                        try:
+                            discovered_peer = Peer(
+                                peer_id=peer_data["peer_id"],
+                                host=peer_data["host"],
+                                port=peer_data["port"],
+                                node_id=peer_data["node_id"],
+                            )
+                        except (KeyError, TypeError, ValueError):
+                            print("Ignoring invalid peer in HELLO_ACK")
+                            continue
+
+                        self.discovered_peers[discovered_peer.peer_id] = (
+                            discovered_peer
+                        )
+                        if self.routing_table is not None:
+                            self.routing_table.add_node(
+                                discovered_peer.node_id
+                            )
+
+                    print(
+                        "Peer registration successful! "
+                        f"Discovered {len(self.discovered_peers)} peer(s)."
+                    )
 
                     self.start_heartbeat()
 
@@ -458,6 +486,41 @@ class UDPClientProtocol(asyncio.DatagramProtocol):
 
                 else:
                     print("Peer registration failed")
+
+            elif message_type == "PEER_JOINED":
+                peer_data = message_data.get("peer", {})
+
+                try:
+                    discovered_peer = Peer(
+                        peer_id=peer_data["peer_id"],
+                        host=peer_data["host"],
+                        port=peer_data["port"],
+                        node_id=peer_data["node_id"],
+                    )
+                except (KeyError, TypeError, ValueError):
+                    print("Ignoring invalid PEER_JOINED notification")
+                    return
+
+                self.discovered_peers[discovered_peer.peer_id] = (
+                    discovered_peer
+                )
+                if self.routing_table is not None:
+                    self.routing_table.add_node(discovered_peer.node_id)
+
+                print(f"Peer joined: {discovered_peer.peer_id}")
+
+            elif message_type == "PEER_LEFT":
+                peer_id = message_data.get("peer_id")
+                removed_peer = self.discovered_peers.pop(peer_id, None)
+
+                node_id = message_data.get("node_id")
+                if removed_peer is not None:
+                    node_id = removed_peer.node_id
+
+                if node_id and self.routing_table is not None:
+                    self.routing_table.remove_node(node_id)
+
+                print(f"Peer left: {peer_id}")
 
             elif message_type == "HEARTBEAT_ACK":
 

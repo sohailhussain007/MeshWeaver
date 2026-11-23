@@ -372,13 +372,36 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
                 self.in_flight_tasks.pop(cache_key, None)
 
     def _cleanup_stale_peers(self):
-        """Remove peers that have stopped sending heartbeats."""
+        """Remove stale peers and notify the remaining network."""
+        known_peers = {
+            peer.peer_id: peer
+            for peer in self.peer_registry.get_all_peers()
+        }
+
         stale_peer_ids = self.peer_registry.remove_stale_peers(
             self.peer_timeout
         )
 
         for peer_id in stale_peer_ids:
+            stale_peer = known_peers.get(peer_id)
             self.peer_addresses.pop(peer_id, None)
+
+            if stale_peer is not None and self.routing_table is not None:
+                self.routing_table.remove_node(stale_peer.node_id)
+
+            notification = create_message(
+                "PEER_LEFT",
+                {
+                    "peer_id": peer_id,
+                    "node_id": (
+                        stale_peer.node_id if stale_peer is not None else None
+                    ),
+                },
+            )
+
+            for address in list(self.peer_addresses.values()):
+                self._send_response(notification, address)
+
             print(f"Removed stale peer: {peer_id}")
 
         return stale_peer_ids
@@ -407,27 +430,52 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             ):
                 hello_message = decode_peer_message(data)
 
+                existing_peers = self.peer_registry.get_all_peers()
+
                 registered = self.peer_registry.register_hello_message(
                     hello_message
                 )
 
                 peer_id = hello_message["payload"]["peer_id"]
                 self.peer_addresses[peer_id] = addr
+                registered_peer = self.peer_registry.get_peer(peer_id)
 
-                if self.routing_table is not None:
-                    peer_id = hello_message["payload"]["peer_id"]
-                    registered_peer = self.peer_registry.get_peer(peer_id)
+                if (
+                    registered_peer is not None
+                    and self.routing_table is not None
+                ):
+                    self.routing_table.add_node(registered_peer.node_id)
 
-                    if registered_peer is not None:
-                        self.routing_table.add_node(registered_peer.node_id)
+                known_peers = [
+                    peer.to_dict()
+                    for peer in existing_peers
+                    if peer.peer_id != peer_id
+                ]
 
                 response = create_message(
                     "HELLO_ACK",
                     {
-                        "peer_id": hello_message["payload"]["peer_id"],
+                        "peer_id": peer_id,
                         "registered": registered,
+                        "peers": known_peers,
                     },
                 )
+
+                if registered and registered_peer is not None:
+                    notification = create_message(
+                        "PEER_JOINED",
+                        {"peer": registered_peer.to_dict()},
+                    )
+
+                    for existing_peer in existing_peers:
+                        existing_address = self.peer_addresses.get(
+                            existing_peer.peer_id
+                        )
+                        if existing_address is not None:
+                            self._send_response(
+                                notification,
+                                existing_address,
+                            )
 
             else:
                 message = parse_message(data.decode("utf-8"))
