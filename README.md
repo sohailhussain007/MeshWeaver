@@ -1,31 +1,91 @@
-﻿# MeshWeaver
+# MeshWeaver
 
-MeshWeaver is a Python-based project for communication between peers using asynchronous UDP networking and serialized task messages.
+MeshWeaver is a Python-based distributed task execution system that uses asynchronous UDP communication to connect peers, discover nodes, and forward tasks between them.
 
 ## Features
 
+### Peer Communication
 - Asynchronous UDP server and client communication.
 - Peer registration using HELLO messages.
-- Heartbeat request and acknowledgment support.
+- Heartbeat request and acknowledgment.
 - PING/PONG health checks.
-- Task serialization and deserialization using Cloudpickle.
-- Base64 encoding for transporting serialized tasks as text.
-- JSON-compatible message transport.
-- Task execution with result and error responses.
 
-## Task Serialization
+### Peer Discovery
+- Peer discovery through HELLO_ACK messages.
+- Kademlia-based node identification and routing table support.
+- Peer JOINED and LEFT notifications.
+- Periodic stale-peer cleanup.
 
-MeshWeaver uses Cloudpickle and Base64 to serialize Python functions and their arguments for communication between peers.
+### Distributed Task Execution
+- Python task serialization using Cloudpickle and Base64.
+- CPU-load-based worker selection and task forwarding.
+- Task result and error responses.
+- Task retry mechanism.
+- Duplicate-task detection to prevent repeated execution.
 
-### serialize_task()
+### Reliability and Error Handling
+- Concurrent task execution limits.
+- Task timeout and cancellation handling.
+- Handling of corrupted serialized task data.
+- Graceful UDP server and client shutdown.
 
-The `serialize_task()` function accepts a callable Python function, positional arguments as a tuple or list, and keyword arguments as a dictionary. It serializes the task using Cloudpickle and encodes the serialized bytes into a Base64 string.
+## Technologies Used
+- Python
+- Asyncio
+- UDP Networking
+- Cloudpickle
+- Psutil
+- Base64
+- JSON
+- Pytest
 
-### deserialize_task()
+## Installation
 
-The `deserialize_task()` function decodes the Base64 string, restores the task using Cloudpickle, validates its function and arguments, and rejects invalid or corrupted serialized task data.
+Clone the repository:
 
-## Example
+```bash
+git clone https://github.com/sohailhussain007/MeshWeaver.git
+cd MeshWeaver
+```
+
+Create and activate a virtual environment (Windows PowerShell):
+
+```powershell
+python -m venv myenv
+.\myenv\Scripts\Activate.ps1
+```
+
+Install dependencies:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+## Running the Project
+
+Start the UDP server:
+
+```powershell
+python -m meshweaver.udp_server
+```
+
+Start a UDP client in another terminal:
+
+```powershell
+python -m meshweaver.udp_client
+```
+
+You can start additional clients to test peer discovery and join/leave notifications.
+
+## Running Tests
+
+Run the complete test suite:
+
+```powershell
+python -m pytest -v
+```
+
+## Task Serialization Example
 
 ```python
 from meshweaver.serialization import serialize_task, deserialize_task
@@ -40,44 +100,10 @@ result = task["function"](*task["args"], **task["kwargs"])
 print(result)  # 30
 ```
 
-## Running the Project
-
-Start the UDP server:
-
-```powershell
-python -m meshweaver.udp_server
-```
-
-Start the UDP client in another terminal:
-
-```powershell
-python -m meshweaver.udp_client
-```
-
-## Running Tests
-
-Install pytest if needed:
-
-```powershell
-python -m pip install pytest
-```
-
-Run the tests:
-
-```powershell
-python -m pytest -v
-```
-
 ## Security Note
 
 Cloudpickle can deserialize executable Python objects. Only deserialize data received from trusted sources.
 
-## Technologies Used
+## Project Documentation
 
-- Python
-- Asyncio
-- UDP Networking
-- Cloudpickle
-- Base64
-- JSON
-- Pytest
+Additional integration notes are available in `docs/integration-review.md`.
