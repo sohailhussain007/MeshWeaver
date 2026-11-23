@@ -21,6 +21,7 @@ def create_hello_message(peer):
             "peer_id": peer.peer_id,
             "host": peer.host,
             "port": peer.port,
+            "node_id": peer.node_id,
         },
     )
 

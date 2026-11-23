@@ -10,6 +10,11 @@ class FakeTransport:
         self.sent_data = None
         self.sent_addr = None
 
+    def get_extra_info(self, name):
+        if name == "sockname":
+            return ("127.0.0.1", 9999)
+        return None
+
     def sendto(self, data, addr):
         self.sent_data = data
         self.sent_addr = addr
@@ -44,3 +49,77 @@ def test_udp_server_registers_hello_peer():
     assert response["data"]["peer_id"] == "node_test"
     assert response["data"]["registered"] is True
     assert transport.sent_addr == address
+
+def test_udp_server_registers_multiple_peers():
+    server = UDPServerProtocol()
+    transport = FakeTransport()
+    server.connection_made(transport)
+
+    peers = [
+        Peer(
+            peer_id="node_1",
+            host="127.0.0.1",
+            port=5001,
+        ),
+        Peer(
+            peer_id="node_2",
+            host="127.0.0.1",
+            port=5002,
+        ),
+        Peer(
+            peer_id="node_3",
+            host="127.0.0.1",
+            port=5003,
+        ),
+    ]
+
+    for peer in peers:
+        message = create_hello_message(peer)
+        data = encode_message(message)
+
+        server.datagram_received(
+            data,
+            (peer.host, peer.port),
+        )
+
+    registered_peers = server.peer_registry.get_all_peers()
+
+    assert len(registered_peers) == 3
+
+    registered_ids = {
+        peer.peer_id for peer in registered_peers
+    }
+
+    assert registered_ids == {
+        "node_1",
+        "node_2",
+        "node_3",
+    }
+def test_duplicate_hello_does_not_duplicate_routing_node():
+    server = UDPServerProtocol()
+    transport = FakeTransport()
+    server.connection_made(transport)
+
+    peer = Peer(
+        peer_id="node_duplicate",
+        host="127.0.0.1",
+        port=5010,
+    )
+
+    message = create_hello_message(peer)
+    data = encode_message(message)
+    address = (peer.host, peer.port)
+
+    server.datagram_received(data, address)
+    server.datagram_received(data, address)
+
+    routing_nodes = [
+        node_id
+        for bucket in server.routing_table.buckets
+        for node_id in bucket
+    ]
+
+    assert routing_nodes.count(peer.node_id) == 1
+
+    response = json.loads(transport.sent_data.decode("utf-8"))
+    assert response["data"]["registered"] is False

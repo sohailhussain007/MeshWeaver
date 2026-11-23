@@ -38,7 +38,8 @@ class TestPeerRegistry(unittest.TestCase):
             "payload": {
                 "peer_id": "node_B",
                 "host": "127.0.0.1",
-                "port": 5001
+                "port": 5001,
+                "node_id": "a" * 40
             }
         }
 
