@@ -30,7 +30,7 @@ def main():
         print("Peer found successfully!")
         print(found_peer)
     else:
-        print("Peer not found!")
+         print("Peer not found!")
 
     # Display peer information and list
     display_node_status(peer.peer_id, "Running")
@@ -43,10 +43,10 @@ def main():
 
     # Remove peer from PeerManager
     if manager.remove_peer(peer.peer_id):
-        print("Peer removed successfully!")
+        registry.unregister_peer(peer.peer_id)
+        print("Peer removed successfully from PeerManager and PeerRegistry!")
     else:
         print("Peer not found!")
-
 
 if __name__ == "__main__":
     main()

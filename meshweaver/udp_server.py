@@ -1,4 +1,4 @@
-
+﻿
 
 import asyncio
 import json
@@ -635,6 +635,17 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         """Cancel unfinished task coroutines when transport closes."""
         self.transport = None
 
+        # Mark in-flight tasks as cancelled before cancelling them.
+        for cache_key, task in list(self.in_flight_tasks.items()):
+            if not task.done():
+                task_id = cache_key[1]
+                self._set_task_status(
+                    task_id,
+                    "CANCELLED",
+                    error="Server shutting down"
+                )
+
+        # Cancel all active task coroutines.
         for task in list(self.active_tasks):
             if not task.done():
                 task.cancel()
@@ -642,6 +653,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
         self.active_tasks.clear()
         self.in_flight_tasks.clear()
 
+        # Cancel pending distributed task futures.
         for record in self.distributed_tasks.values():
             future = record["future"]
             if not future.done():
