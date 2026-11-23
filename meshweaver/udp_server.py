@@ -82,6 +82,7 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             raise ValueError("peer_timeout must be a positive number")
 
         self.peer_timeout = peer_timeout
+        self._peer_cleanup_task = None
 
         self.transport = None
         self.peer_registry = peer_registry or PeerRegistry()
@@ -168,6 +169,19 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
 
     def connection_made(self, transport):
         self.transport = transport
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop is not None and (
+            self._peer_cleanup_task is None
+            or self._peer_cleanup_task.done()
+        ):
+            self._peer_cleanup_task = loop.create_task(
+                self._peer_cleanup_loop()
+            )
 
         get_extra_info = getattr(transport, "get_extra_info", None)
         local_address = (
@@ -368,6 +382,18 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
             print(f"Removed stale peer: {peer_id}")
 
         return stale_peer_ids
+
+    async def _peer_cleanup_loop(self):
+        """Periodically remove peers that have stopped sending heartbeats."""
+        interval = min(5, self.peer_timeout / 2)
+
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                self._cleanup_stale_peers()
+        except asyncio.CancelledError:
+            raise
+
 
     def datagram_received(self, data, addr):
         try:
@@ -634,6 +660,14 @@ class UDPServerProtocol(asyncio.DatagramProtocol):
     def connection_lost(self, exc):
         """Cancel unfinished task coroutines when transport closes."""
         self.transport = None
+
+        if (
+            self._peer_cleanup_task is not None
+            and not self._peer_cleanup_task.done()
+        ):
+            self._peer_cleanup_task.cancel()
+
+        self._peer_cleanup_task = None
 
         # Mark in-flight tasks as cancelled before cancelling them.
         for cache_key, task in list(self.in_flight_tasks.items()):
